@@ -30,12 +30,7 @@ build-gcf-zip:
 #
 .PHONY: build-lambda-docker
 build-lambda-docker:
-#   todo: build exe in docker?
-#	$(IN_LAMBDA) go mod vendor
-	$(IN_LAMBDA) go build -o ./lambda
-	$(IN_LAMBDA) docker build -t tempo-serverless .
-	$(IN_LAMBDA) rm ./lambda
-#	$(IN_LAMBDA) rm -rf vendor
+	$(IN_LAMBDA) docker build -t tempo-serverless:lambda-$(VERISON) .
 
 # lambda zips expect a compiled executable in root. the filename "main" is important
 # as that should the handler config option in aws
@@ -54,4 +49,4 @@ test:
 update-mod:
 	$(IN_LAMBDA) go mod tidy -e
 	$(IN_CLOUD_FUNCTIONS) go mod tidy -e
-    
+
