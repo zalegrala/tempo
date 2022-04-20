@@ -28,7 +28,7 @@ For more guidance on configuration options for full backend search [check here](
 3. Copy the ZIP file into your bucket.
 
     ```
-    aws s3 cp lambda/tempo-serverless-backend-search-297172a.zip gs://<newly provisioned gcs bucket>
+    aws s3 cp lambda/tempo-serverless-backend-search-297172a.zip s3://<newly provisioned s3 bucket>
     ```
 
 4. Provision the Lambda. In order for a Lambda function to be invoked via http we also need to create an
