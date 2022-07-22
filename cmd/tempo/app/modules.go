@@ -33,7 +33,7 @@ import (
 
 // The various modules that make up tempo.
 const (
-	Ring                 string = "ring"
+	IngesterRing         string = "ring"
 	MetricsGeneratorRing string = "metrics-generator-ring"
 	Overrides            string = "overrides"
 	Server               string = "server"
@@ -79,7 +79,7 @@ func (t *App) initServer() (services.Service, error) {
 	return s, nil
 }
 
-func (t *App) initRing() (services.Service, error) {
+func (t *App) initIngesterRing() (services.Service, error) {
 	ring, err := tempo_ring.New(t.cfg.Ingester.LifecyclerConfig.RingConfig, "ingester", t.cfg.Ingester.OverrideRingKey, prometheus.DefaultRegisterer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ring %w", err)
@@ -256,12 +256,12 @@ func (t *App) initQueryFrontend() (services.Service, error) {
 func (t *App) initCompactor() (services.Service, error) {
 	compactor, err := compactor.New(t.cfg.Compactor, t.store, t.overrides, prometheus.DefaultRegisterer)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create compactor %w", err)
+		return nil, fmt.Errorf("failed to create compactor: %w", err)
 	}
 	t.compactor = compactor
 
-	if t.compactor.Ring != nil {
-		t.Server.HTTP.Handle("/compactor/ring", t.compactor.Ring)
+	if t.compactor.CompactorRing != nil {
+		t.Server.HTTP.Handle("/compactor/ring", t.compactor.CompactorRing)
 	}
 
 	return t.compactor, nil
@@ -270,7 +270,7 @@ func (t *App) initCompactor() (services.Service, error) {
 func (t *App) initStore() (services.Service, error) {
 	store, err := tempo_storage.NewStore(t.cfg.StorageConfig, log.Logger)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create store %w", err)
+		return nil, fmt.Errorf("failed to create store: %w", err)
 	}
 	t.store = store
 
@@ -311,7 +311,7 @@ func (t *App) setupModuleManager() error {
 
 	mm.RegisterModule(Server, t.initServer, modules.UserInvisibleModule)
 	mm.RegisterModule(MemberlistKV, t.initMemberlistKV, modules.UserInvisibleModule)
-	mm.RegisterModule(Ring, t.initRing, modules.UserInvisibleModule)
+	mm.RegisterModule(IngesterRing, t.initIngesterRing, modules.UserInvisibleModule)
 	mm.RegisterModule(MetricsGeneratorRing, t.initGeneratorRing, modules.UserInvisibleModule)
 	mm.RegisterModule(Overrides, t.initOverrides, modules.UserInvisibleModule)
 	mm.RegisterModule(Distributor, t.initDistributor)
@@ -330,12 +330,12 @@ func (t *App) setupModuleManager() error {
 		Overrides:            {Server},
 		MemberlistKV:         {Server},
 		QueryFrontend:        {Store, Server, Overrides},
-		Ring:                 {Server, MemberlistKV},
+		IngesterRing:         {Server, MemberlistKV},
 		MetricsGeneratorRing: {Server, MemberlistKV},
-		Distributor:          {Ring, Server, Overrides},
+		Distributor:          {IngesterRing, Server, Overrides},
 		Ingester:             {Store, Server, Overrides, MemberlistKV},
 		MetricsGenerator:     {Server, Overrides, MemberlistKV},
-		Querier:              {Store, Ring, Overrides},
+		Querier:              {Store, IngesterRing, Overrides},
 		Compactor:            {Store, Server, Overrides, MemberlistKV},
 		SingleBinary:         {Compactor, QueryFrontend, Querier, Ingester, Distributor},
 		ScalableSingleBinary: {SingleBinary},
@@ -364,7 +364,7 @@ func addHTTPAPIPrefix(cfg *Config, apiPath string) string {
 }
 
 func echoHandler() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "echo", http.StatusOK)
 	}
 }

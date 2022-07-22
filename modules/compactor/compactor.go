@@ -44,9 +44,9 @@ type Compactor struct {
 	store     storage.Store
 	overrides *overrides.Overrides
 
-	// Ring used for sharding compactions.
+	// CompactorRing used for sharding compactions.
 	ringLifecycler *ring.BasicLifecycler
-	Ring           *ring.Ring
+	CompactorRing  *ring.Ring
 
 	subservices        *services.Manager
 	subservicesWatcher *services.FailureWatcher
@@ -87,7 +87,7 @@ func New(cfg Config, store storage.Store, overrides *overrides.Overrides, reg pr
 			return nil, errors.Wrap(err, "unable to initialize compactor ring lifecycler")
 		}
 
-		c.Ring, err = ring.New(c.cfg.ShardingRing.ToLifecyclerConfig().RingConfig, compactorRingKey, cfg.OverrideRingKey, log.Logger, reg)
+		c.CompactorRing, err = ring.New(c.cfg.ShardingRing.ToLifecyclerConfig().RingConfig, compactorRingKey, cfg.OverrideRingKey, log.Logger, reg)
 		if err != nil {
 			return nil, errors.Wrap(err, "unable to initialize compactor ring")
 		}
@@ -113,7 +113,7 @@ func (c *Compactor) starting(ctx context.Context) (err error) {
 	}()
 
 	if c.isSharded() {
-		c.subservices, err = services.NewManager(c.ringLifecycler, c.Ring)
+		c.subservices, err = services.NewManager(c.ringLifecycler, c.CompactorRing)
 		if err != nil {
 			return fmt.Errorf("failed to create subservices %w", err)
 		}
@@ -129,7 +129,7 @@ func (c *Compactor) starting(ctx context.Context) (err error) {
 		level.Info(log.Logger).Log("msg", "waiting until compactor is ACTIVE in the ring")
 		ctxWithTimeout, cancel := context.WithTimeout(ctx, c.cfg.ShardingRing.WaitActiveInstanceTimeout)
 		defer cancel()
-		if err := ring.WaitInstanceState(ctxWithTimeout, c.Ring, c.ringLifecycler.GetInstanceID(), ring.ACTIVE); err != nil {
+		if err := ring.WaitInstanceState(ctxWithTimeout, c.CompactorRing, c.ringLifecycler.GetInstanceID(), ring.ACTIVE); err != nil {
 			return err
 		}
 		level.Info(log.Logger).Log("msg", "compactor is ACTIVE in the ring")
@@ -142,7 +142,7 @@ func (c *Compactor) starting(ctx context.Context) (err error) {
 			maxWaiting := c.cfg.ShardingRing.WaitStabilityMaxDuration
 
 			level.Info(log.Logger).Log("msg", "waiting until compactor ring topology is stable", "min_waiting", minWaiting.String(), "max_waiting", maxWaiting.String())
-			if err := ring.WaitRingStability(ctx, c.Ring, ringOp, minWaiting, maxWaiting); err != nil {
+			if err := ring.WaitRingStability(ctx, c.CompactorRing, ringOp, minWaiting, maxWaiting); err != nil {
 				level.Warn(log.Logger).Log("msg", "compactor ring topology is not stable after the max waiting time, proceeding anyway")
 			} else {
 				level.Info(log.Logger).Log("msg", "compactor ring topology is stable")
@@ -195,7 +195,7 @@ func (c *Compactor) Owns(hash string) bool {
 	_, _ = hasher.Write([]byte(hash))
 	hash32 := hasher.Sum32()
 
-	rs, err := c.Ring.Get(hash32, ringOp, []ring.InstanceDesc{}, nil, nil)
+	rs, err := c.CompactorRing.Get(hash32, ringOp, []ring.InstanceDesc{}, nil, nil)
 	if err != nil {
 		level.Error(log.Logger).Log("msg", "failed to get ring", "err", err)
 		return false
