@@ -51,26 +51,11 @@
     ]) +
     $.util.withResources($._config.tempo_ssb.resources),
 
-  tempo_query_container::
-    container.new('tempo-query', $._images.tempo_query) +
-    container.withPorts([
-      containerPort.new('jaeger-ui', 16686),
-      containerPort.new('jaeger-metrics', 16687),
-    ]) +
-    container.withArgs([
-      '--query.base-path=' + $._config.jaeger_ui.base_path,
-      '--grpc-storage-plugin.configuration-file=/conf/tempo-query.yaml',
-    ]) +
-    container.withVolumeMounts([
-      volumeMount.new(tempo_query_config_volume, '/conf'),
-    ]),
-
   tempo_statefulset:
     statefulset.new('tempo',
                     $._config.tempo_ssb.replicas,
                     [
                       $.tempo_container,
-                      $.tempo_query_container,
                     ],
                     self.tempo_pvc,
                     { app: 'tempo' }) +
