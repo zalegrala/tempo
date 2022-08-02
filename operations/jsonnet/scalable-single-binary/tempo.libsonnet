@@ -78,20 +78,26 @@
     statefulset.mixin.spec.template.metadata.withAnnotations({
       config_hash: std.md5(std.toString($.tempo_configmap.data['tempo.yaml'])),
     }) +
+    statefulset.mixin.metadata.withLabels({ app: $._config.tempo_ssb.headless_service_name, name: 'tempo' }) +
+    statefulset.mixin.spec.selector.withMatchLabels({ name: 'tempo' }) +
+    statefulset.mixin.spec.template.metadata.withLabels({ name: 'tempo', app: $._config.tempo_ssb.headless_service_name }) +
     statefulset.mixin.spec.template.spec.withVolumes([
       volume.fromConfigMap(tempo_query_config_volume, $.tempo_query_configmap.metadata.name),
       volume.fromConfigMap(tempo_config_volume, $.tempo_configmap.metadata.name),
     ]),
 
   tempo_service:
-    k.util.serviceFor($.tempo_statefulset)
-    + service.mixin.spec.withPortsMixin([
-      servicePort.newNamed(
-        name='http',
-        port=80,
-        targetPort=16686,
-      ),
-    ]),
+    k.util.serviceFor($.tempo_statefulset),
+
+
+  tempo_headless_service:
+    service.new(
+      $._config.tempo_ssb.headless_service_name,
+      { app: $._config.tempo_ssb.headless_service_name },
+      []
+    ) +
+    service.mixin.spec.withClusterIP('None') +
+    service.mixin.spec.withPublishNotReadyAddresses(true),
 
   util+:: {
     local k = import 'ksonnet-util/kausal.libsonnet',

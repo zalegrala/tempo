@@ -6,7 +6,6 @@
   },
 
   _config+:: {
-    gossip_member_label: 'tempo-gossip-member',
     port: 3200,
     distributor+: {
       receivers: $._config.distributor.receivers,
@@ -30,6 +29,7 @@
       replicas: 3,
       pvc_size: error 'Must specify an ingester pvc size',
       pvc_storage_class: error 'Must specify an ingester pvc storage class',
+      headless_service_name: 'tempo-ssb-ring',
       resources: {
         requests: {
           cpu: '500m',
