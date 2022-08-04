@@ -17,6 +17,8 @@ const (
 	MetaName          = "meta.json"
 	CompactedMetaName = "meta.compacted.json"
 	TenantIndexName   = "index.json.gz"
+	// File name of the cluster seed file for usagestats.
+	ClusterSeedFileName = "tempo_cluster_seed.json"
 )
 
 // KeyPath is an ordered set of strings that govern where data is read/written from the backend
@@ -143,7 +145,7 @@ func (r *reader) Blocks(ctx context.Context, tenantID string) ([]uuid.UUID, erro
 	for _, id := range objects {
 		// TODO: this line exists due to behavior differences in backends: https://github.com/grafana/tempo/issues/880
 		// revisit once #880 is resolved.
-		if id == TenantIndexName || id == "" {
+		if id == TenantIndexName || id == ClusterSeedFileName || id == "" {
 			continue
 		}
 		uuid, err := uuid.Parse(id)
