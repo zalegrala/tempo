@@ -69,7 +69,7 @@ require (
 	github.com/stretchr/testify v1.8.0
 	github.com/uber-go/atomic v1.4.0
 	github.com/uber/jaeger-client-go v2.30.0+incompatible
-	github.com/weaveworks/common v0.0.0-20220916164235-da3fde973eec
+	github.com/weaveworks/common v0.0.0-20220927162600-d0a1a93a15be
 	github.com/willf/bloom v2.0.3+incompatible
 	go.opencensus.io v0.23.0
 	go.opentelemetry.io/collector v0.57.2
