@@ -33,10 +33,9 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/gorilla/mux v1.8.0
 	github.com/grafana/dskit v0.0.0-20221102173529-7450e99ab017
-	github.com/grafana/e2e v0.1.1-0.20221018202458-cffd2bb71c7b
 	github.com/grpc-ecosystem/grpc-opentracing v0.0.0-20180507213350-8e809c8a8645
 	github.com/hashicorp/go-hclog v1.2.1
-	github.com/hashicorp/go-plugin v1.4.4
+	github.com/hashicorp/go-plugin v1.4.6
 	github.com/jaegertracing/jaeger v1.36.0
 	github.com/jedib0t/go-pretty/v6 v6.2.4
 	github.com/json-iterator/go v1.1.12
@@ -96,6 +95,7 @@ require (
 )
 
 require (
+	github.com/grafana/e2e v0.1.0
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	golang.org/x/exp v0.0.0-20221002003631-540bb7301a08
 )
@@ -236,6 +236,7 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stretchr/objx v0.5.0 // indirect
 	github.com/subosito/gotenv v1.3.0 // indirect
+	github.com/thanos-io/thanos v0.24.0 // indirect
 	github.com/tklauser/go-sysconf v0.3.10 // indirect
 	github.com/tklauser/numcpus v0.4.0 // indirect
 	github.com/uber/jaeger-lib v2.4.1+incompatible // indirect
