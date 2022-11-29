@@ -38,7 +38,7 @@ require (
 	github.com/hashicorp/go-hclog v1.2.1
 	github.com/hashicorp/go-plugin v1.4.4
 	github.com/jaegertracing/jaeger v1.36.0
-	github.com/jedib0t/go-pretty/v6 v6.2.4
+	github.com/jedib0t/go-pretty/v6 v6.4.3
 	github.com/json-iterator/go v1.1.12
 	github.com/jsternberg/zap-logfmt v1.2.0
 	github.com/klauspost/compress v1.15.9
