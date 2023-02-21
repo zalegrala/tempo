@@ -74,7 +74,7 @@
   tempo_ingester_service:
     k.util.serviceFor($.tempo_ingester_statefulset),
 
-  local podDisruptionBudget = k.policy.v1beta1.podDisruptionBudget,
+  local podDisruptionBudget = k.policy.v1.podDisruptionBudget,
   ingester_pdb:
     podDisruptionBudget.new() +
     podDisruptionBudget.mixin.metadata.withName(target_name) +
