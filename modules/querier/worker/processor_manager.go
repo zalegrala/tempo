@@ -64,8 +64,11 @@ func (pm *processorManager) concurrency(n int) {
 		n = 0
 	}
 
+	var ctx context.Context
+	var cancel context.CancelFunc
+
 	for len(pm.cancels) < n {
-		ctx, cancel := context.WithCancel(pm.ctx)
+		ctx, cancel = context.WithCancel(pm.ctx)
 		pm.cancels = append(pm.cancels, cancel)
 
 		pm.wg.Add(1)
