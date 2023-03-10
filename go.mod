@@ -35,7 +35,7 @@ require (
 	github.com/grafana/e2e v0.1.1-0.20221018202458-cffd2bb71c7b
 	github.com/grpc-ecosystem/grpc-opentracing v0.0.0-20180507213350-8e809c8a8645
 	github.com/hashicorp/go-hclog v1.2.1
-	github.com/hashicorp/go-plugin v1.4.4
+	github.com/hashicorp/go-plugin v1.4.9
 	github.com/jaegertracing/jaeger v1.36.0
 	github.com/jedib0t/go-pretty/v6 v6.2.4
 	github.com/json-iterator/go v1.1.12
