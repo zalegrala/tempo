@@ -90,15 +90,17 @@ For more details, see the Kubernetes documentation about [Creating a new namespa
 
 ## Set Helm chart values
 
-Your Helm chart values are set in the `custom.yaml` file. The following example `custom.yaml` file sets the storage and traces options, enables the gateway, and sets the cluster to main. The `traces` configure the distributor's receiver protocols.
+Your Helm chart values are set in the `custom.yaml` file.
 
 Next, you will:
 
-1. Create a `custom.yaml` file
+1. Create a `custom.yaml` values file to configure the chart
 2. Set your storage values, the example above points to the MinIO instance configured by the chart
 3. Set your traces values to configure the receivers on the Tempo distributor
 
 ### Tempo helm chart values
+
+The following example `custom.yaml` file sets the storage and traces options, enables the gateway, and sets the cluster to main. The `traces` configure the distributor's receiver protocols.
 
 ```yaml
 ---
@@ -138,7 +140,7 @@ traces:
 
 ### Grafana Enterprise Traces helm chart values
 
-The values in the example below provide configuration values for GET.
+The `custom.yaml` values in the example below provide configuration values for a GET installation.
 
 ```yaml
 ---
@@ -273,7 +275,7 @@ Enterprise users will also need to specify an additional bucket for `admin` reso
 Each storage provider has a different configuration stanza, which are detailed in Tempo's documentation. You will need to update your configuration based upon you storage provider.
 Refer to the [`storage` configuration block](https://grafana.com/docs/tempo/latest/configuration/#storage) for information on storage options.
 
-To use other storage options, set `minio.enabled: false` in the `values.yaml` file:
+To use other storage options, set `minio.enabled: false` in the `custom.yaml` file:
 
 ```yaml
 ---
@@ -393,7 +395,7 @@ Installed components:
 * memcached
 ```
 
-> **NOTE**: If you update your `values.yaml` or `custom.yaml`, run the same helm install command and replace `install` with `upgrade`.
+> **NOTE**: If you update your `custom.yaml` values file, run the same helm install command and replace `install` with `upgrade`.
 
 Check the statuses of the Tempo pods:
 
