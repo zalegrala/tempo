@@ -7,21 +7,22 @@ import (
 type Operands []Static
 
 type Condition struct {
-	Attribute Attribute
-	Op        Operator
-	Operands  Operands
+	Attribute  Attribute
+	Op         Operator
+	Operands   Operands
+	MegaSelect bool
 }
 
 func SearchMetaConditions() []Condition {
 	return []Condition{
-		{NewIntrinsic(IntrinsicTraceRootService), OpNone, nil},
-		{NewIntrinsic(IntrinsicTraceRootSpan), OpNone, nil},
-		{NewIntrinsic(IntrinsicTraceDuration), OpNone, nil},
-		{NewIntrinsic(IntrinsicTraceID), OpNone, nil},
-		{NewIntrinsic(IntrinsicTraceStartTime), OpNone, nil},
-		{NewIntrinsic(IntrinsicSpanID), OpNone, nil},
-		{NewIntrinsic(IntrinsicSpanStartTime), OpNone, nil},
-		{NewIntrinsic(IntrinsicDuration), OpNone, nil},
+		{NewIntrinsic(IntrinsicTraceRootService), OpNone, nil, false},
+		{NewIntrinsic(IntrinsicTraceRootSpan), OpNone, nil, false},
+		{NewIntrinsic(IntrinsicTraceDuration), OpNone, nil, false},
+		{NewIntrinsic(IntrinsicTraceID), OpNone, nil, false},
+		{NewIntrinsic(IntrinsicTraceStartTime), OpNone, nil, false},
+		{NewIntrinsic(IntrinsicSpanID), OpNone, nil, false},
+		{NewIntrinsic(IntrinsicSpanStartTime), OpNone, nil, false},
+		{NewIntrinsic(IntrinsicDuration), OpNone, nil, false},
 	}
 }
 

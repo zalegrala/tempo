@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"path"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -1180,4 +1181,61 @@ func TestWALBlockGetMetrics(t *testing.T) {
 	require.Equal(t, 1, res.Series[two].Count())
 	require.Equal(t, uint64(1), res.Series[one].Percentile(1.0)) // The only span was 1ns
 	require.Equal(t, uint64(2), res.Series[two].Percentile(1.0)) // The only span was 2ns
+}
+
+func TestMegaSelect(b *testing.T) {
+	ctx := context.TODO()
+	tenantID := "1"
+	blockID := uuid.MustParse("2968a567-5873-4e4c-b3cb-21c106c6714b")
+
+	r, _, _, err := local.New(&local.Config{
+		Path: path.Join("/Users/marty/src/tmp/"),
+	})
+	require.NoError(b, err)
+
+	rr := backend.NewReader(r)
+	meta, err := rr.BlockMeta(ctx, blockID, tenantID)
+	require.NoError(b, err)
+
+	block, err := encoding.OpenBlock(meta, rr)
+
+	f := traceql.NewSpansetFetcherWrapper(func(ctx context.Context, req traceql.FetchSpansRequest) (traceql.FetchSpansResponse, error) {
+		return block.Fetch(ctx, req, common.DefaultSearchOptions())
+	})
+
+	start := time.Now()
+
+	results, err := traceqlmetrics.MegaSelect(ctx, "{resource.service.name=`tempo-gateway`}", 0, 0, f)
+	// results, err := traceqlmetrics.MegaSelect(ctx, "{resource.cluster=`prod-us-central-0` && status=error}", 0, 0, f)
+	require.NoError(b, err)
+
+	mega := time.Since(start)
+
+	series := make([]traceqlmetrics.KeyValue, 0, len(results.Series))
+	for s := range results.Series {
+		series = append(series, s[0])
+	}
+	sort.Slice(series, func(i, j int) bool {
+		switch strings.Compare(series[i].Key, series[j].Key) {
+		case -1:
+			return true
+		case 0:
+			return strings.Compare(series[i].Value.String(), series[j].Value.String()) == -1
+		default:
+			return false
+		}
+	})
+
+	sort := time.Since(start) - mega
+
+	for _, s := range series {
+		h := results.Series[traceqlmetrics.MetricSeries{s}]
+		if h.Count() > 2 {
+			fmt.Println("Series", s.Key, "=", s.Value.String(), "count=", h.Count(), "p95 = ", time.Duration(h.Percentile(0.95)))
+		}
+	}
+
+	print := time.Since(start) - mega - sort
+
+	fmt.Println("Duration: mega:", mega, "sort:", sort, "print", print)
 }

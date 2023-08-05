@@ -936,7 +936,7 @@ func createSpanIterator(makeIter makeIterFn, primaryIter parquetquery.Iterator, 
 		}
 
 		// Well-known attribute?
-		if entry, ok := wellKnownColumnLookups[cond.Attribute.Name]; ok && entry.level != traceql.AttributeScopeResource {
+		/*if entry, ok := wellKnownColumnLookups[cond.Attribute.Name]; ok && entry.level != traceql.AttributeScopeResource {
 			if cond.Op == traceql.OpNone {
 				addPredicate(entry.columnPath, nil) // No filtering
 				columnSelectAs[entry.columnPath] = cond.Attribute.Name
@@ -953,10 +953,46 @@ func createSpanIterator(makeIter makeIterFn, primaryIter parquetquery.Iterator, 
 				columnSelectAs[entry.columnPath] = cond.Attribute.Name
 				continue
 			}
+		}*/
+		generic := true
+
+		for wellKnownAttr, entry := range wellKnownColumnLookups {
+			if entry.level != traceql.AttributeScopeSpan {
+				continue
+			}
+
+			if cond.MegaSelect {
+				addPredicate(entry.columnPath, nil) // No filtering
+				columnSelectAs[entry.columnPath] = wellKnownAttr
+				continue
+			}
+
+			if cond.Attribute.Name == wellKnownAttr {
+				generic = false
+
+				if cond.Op == traceql.OpNone {
+					addPredicate(entry.columnPath, nil) // No filtering
+					columnSelectAs[entry.columnPath] = wellKnownAttr
+					break
+				}
+
+				// Compatible type?
+				if entry.typ == operandType(cond.Operands) {
+					pred, err := createPredicate(cond.Op, cond.Operands)
+					if err != nil {
+						return nil, errors.Wrap(err, "creating predicate")
+					}
+					addPredicate(entry.columnPath, pred)
+					columnSelectAs[entry.columnPath] = wellKnownAttr
+					break
+				}
+			}
 		}
 
 		// Else: generic attribute lookup
-		genericConditions = append(genericConditions, cond)
+		if generic {
+			genericConditions = append(genericConditions, cond)
+		}
 	}
 
 	attrIter, err := createAttributeIterator(makeIter, genericConditions, DefinitionLevelResourceSpansILSSpanAttrs,
@@ -1045,7 +1081,7 @@ func createResourceIterator(makeIter makeIterFn, spanIterator parquetquery.Itera
 	for _, cond := range conditions {
 
 		// Well-known selector?
-		if entry, ok := wellKnownColumnLookups[cond.Attribute.Name]; ok && entry.level != traceql.AttributeScopeSpan {
+		/*if entry, ok := wellKnownColumnLookups[cond.Attribute.Name]; ok && entry.level != traceql.AttributeScopeSpan {
 			if cond.Op == traceql.OpNone {
 				addPredicate(entry.columnPath, nil) // No filtering
 				columnSelectAs[entry.columnPath] = cond.Attribute.Name
@@ -1061,10 +1097,46 @@ func createResourceIterator(makeIter makeIterFn, spanIterator parquetquery.Itera
 				iters = append(iters, makeIter(entry.columnPath, pred, cond.Attribute.Name))
 				continue
 			}
+		}*/
+		generic := true
+
+		for wellKnownAttr, entry := range wellKnownColumnLookups {
+			if entry.level != traceql.AttributeScopeResource {
+				continue
+			}
+
+			if cond.MegaSelect {
+				addPredicate(entry.columnPath, nil) // No filtering
+				columnSelectAs[entry.columnPath] = wellKnownAttr
+				continue
+			}
+
+			if cond.Attribute.Name == wellKnownAttr {
+				generic = false
+
+				if cond.Op == traceql.OpNone {
+					addPredicate(entry.columnPath, nil) // No filtering
+					columnSelectAs[entry.columnPath] = wellKnownAttr
+					break
+				}
+
+				// Compatible type?
+				if entry.typ == operandType(cond.Operands) {
+					pred, err := createPredicate(cond.Op, cond.Operands)
+					if err != nil {
+						return nil, errors.Wrap(err, "creating predicate")
+					}
+					addPredicate(entry.columnPath, pred)
+					columnSelectAs[entry.columnPath] = wellKnownAttr
+					break
+				}
+			}
 		}
 
 		// Else: generic attribute lookup
-		genericConditions = append(genericConditions, cond)
+		if generic {
+			genericConditions = append(genericConditions, cond)
+		}
 	}
 
 	for columnPath, predicates := range columnPredicates {
@@ -1429,7 +1501,11 @@ func createAttributeIterator(makeIter makeIterFn, conditions []traceql.Condition
 	)
 	for _, cond := range conditions {
 
-		attrKeys = append(attrKeys, cond.Attribute.Name)
+		if cond.MegaSelect {
+			attrKeys = append(attrKeys, "*")
+		} else {
+			attrKeys = append(attrKeys, cond.Attribute.Name)
+		}
 
 		if cond.Op == traceql.OpNone {
 			// This means we have to scan all values, we don't know what type
@@ -1487,6 +1563,13 @@ func createAttributeIterator(makeIter makeIterFn, conditions []traceql.Condition
 		valueIters = append(valueIters, makeIter(boolPath, parquetquery.NewOrPredicate(boolPreds...), "bool"))
 	}
 
+	var keyPred parquetquery.Predicate
+	if len(attrKeys) == 1 && attrKeys[0] == "*" {
+		keyPred = nil
+	} else {
+		keyPred = parquetquery.NewStringInPredicate(attrKeys)
+	}
+
 	if len(valueIters) > 0 {
 		// LeftJoin means only look at rows where the key is what we want.
 		// Bring in any of the typed values as needed.
@@ -1494,14 +1577,14 @@ func createAttributeIterator(makeIter makeIterFn, conditions []traceql.Condition
 		// if all conditions must be true we can use a simple join iterator to test the values one column at a time.
 		// len(valueIters) must be 1 to handle queries like `{ span.foo = "x" && span.bar > 1}`
 		if allConditions && len(valueIters) == 1 {
-			iters := append([]parquetquery.Iterator{makeIter(keyPath, parquetquery.NewStringInPredicate(attrKeys), "key")}, valueIters...)
+			iters := append([]parquetquery.Iterator{makeIter(keyPath, keyPred, "key")}, valueIters...)
 			return parquetquery.NewJoinIterator(definitionLevel,
 				iters,
 				&attributeCollector{}), nil
 		}
 
 		return parquetquery.NewLeftJoinIterator(definitionLevel,
-			[]parquetquery.Iterator{makeIter(keyPath, parquetquery.NewStringInPredicate(attrKeys), "key")},
+			[]parquetquery.Iterator{makeIter(keyPath, keyPred, "key")},
 			valueIters,
 			&attributeCollector{}), nil
 	}
