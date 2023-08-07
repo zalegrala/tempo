@@ -2,34 +2,82 @@ package traceqlmetrics
 
 import (
 	"context"
+	"sort"
+	"strings"
+	"time"
 
 	"github.com/grafana/tempo/pkg/traceql"
 	"github.com/grafana/tempo/pkg/util"
 	"github.com/pkg/errors"
 )
 
-type AttrValue struct {
+type Label struct {
 	Key   traceql.Attribute
 	Value traceql.Static
 }
 
+type GrubbleTimeSeries struct {
+	TotalCount int
+	Label      Label
+	Timestamps map[uint32]*LatencyHistogram
+}
+
+func NewGrubbleTimeSeries(v Label) *GrubbleTimeSeries {
+	return &GrubbleTimeSeries{
+		Label:      v,
+		Timestamps: map[uint32]*LatencyHistogram{},
+	}
+}
+
+func (ts *GrubbleTimeSeries) Record(timestamp uint32, durationNanos uint64) {
+	ts.TotalCount++
+
+	s := ts.Timestamps[timestamp]
+	if s == nil {
+		s = &LatencyHistogram{}
+		ts.Timestamps[timestamp] = s
+	}
+	s.Record(durationNanos)
+}
+
 type GrubbleResults struct {
-	Series map[AttrValue]*LatencyHistogram
+	Series map[Label]*GrubbleTimeSeries
 }
 
 func NewGrubbleResults() *GrubbleResults {
 	return &GrubbleResults{
-		Series: map[AttrValue]*LatencyHistogram{},
+		Series: map[Label]*GrubbleTimeSeries{},
 	}
 }
 
-func (m *GrubbleResults) Record(v AttrValue, durationNanos uint64) {
+func (m *GrubbleResults) Record(v Label, timestamp uint32, durationNanos uint64) {
 	s := m.Series[v]
 	if s == nil {
-		s = &LatencyHistogram{}
+		s = NewGrubbleTimeSeries(v)
+		s.Label = v
 		m.Series[v] = s
 	}
-	s.Record(durationNanos)
+	s.Record(timestamp, durationNanos)
+}
+
+func (m *GrubbleResults) Sorted() []*GrubbleTimeSeries {
+	all := make([]*GrubbleTimeSeries, 0, len(m.Series))
+
+	for _, s := range m.Series {
+		all = append(all, s)
+	}
+
+	sort.Slice(all, func(i, j int) bool {
+		switch strings.Compare(all[i].Label.Key.String(), all[j].Label.Key.String()) {
+		case -1:
+			return true
+		case 0:
+			return strings.Compare(all[i].Label.Value.String(), all[j].Label.Value.String()) == -1
+		default:
+			return false
+		}
+	})
+	return all
 }
 
 func MegaSelect(ctx context.Context, query string, start, end uint64, fetcher traceql.SpansetFetcher) (*GrubbleResults, error) {
@@ -39,11 +87,12 @@ func MegaSelect(ctx context.Context, query string, start, end uint64, fetcher tr
 	}
 
 	var (
-		duration   = traceql.NewIntrinsic(traceql.IntrinsicDuration)
-		name       = traceql.NewIntrinsic(traceql.IntrinsicName)
+		duration = traceql.NewIntrinsic(traceql.IntrinsicDuration)
+		// name       = traceql.NewIntrinsic(traceql.IntrinsicName)
 		startTime  = traceql.NewIntrinsic(traceql.IntrinsicSpanStartTime)
 		startValue = traceql.NewStaticInt(int(start))
 		status     = traceql.NewIntrinsic(traceql.IntrinsicStatus)
+		interval   = uint64(time.Minute)
 		// statusErr  = traceql.NewStaticStatus(traceql.StatusError)
 		// spanCount  = 0
 		// results    = NewMetricsResults()
@@ -72,7 +121,8 @@ func MegaSelect(ctx context.Context, query string, start, end uint64, fetcher tr
 	}
 	addConditionIfNotPresent(status)
 	addConditionIfNotPresent(duration)
-	addConditionIfNotPresent(name)
+	// addConditionIfNotPresent(name)
+	addConditionIfNotPresent(startTime)
 	req.SecondPassConditions = append(req.SecondPassConditions, traceql.Condition{MegaSelect: true})
 
 	req.SecondPass = func(s *traceql.Spanset) ([]*traceql.Spanset, error) {
@@ -104,11 +154,15 @@ func MegaSelect(ctx context.Context, query string, start, end uint64, fetcher tr
 		}
 
 		for _, s := range ss.Spans {
+
+			startTime := uint32(time.Unix(0, int64(s.StartTimeUnixNanos()/interval*interval)).Unix())
+			dur := s.DurationNanos()
+
 			// fmt.Println("Got span with attrs:")
 			for k, v := range s.Attributes() {
 				// fmt.Println("  ", k, v)
 				if k != duration {
-					results.Record(AttrValue{k, v}, s.DurationNanos())
+					results.Record(Label{k, v}, startTime, dur)
 				}
 			}
 		}

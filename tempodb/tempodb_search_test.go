@@ -1198,46 +1198,35 @@ func TestMegaSelect(b *testing.T) {
 	require.NoError(b, err)
 
 	block, err := encoding.OpenBlock(meta, rr)
+	require.NoError(b, err)
 
 	f := traceql.NewSpansetFetcherWrapper(func(ctx context.Context, req traceql.FetchSpansRequest) (traceql.FetchSpansResponse, error) {
 		return block.Fetch(ctx, req, common.DefaultSearchOptions())
 	})
 
-	start := time.Now()
-
-	// results, err := traceqlmetrics.MegaSelect(ctx, "{resource.service.name=`tempo-gateway`}", 0, 0, f)
-	results, err := traceqlmetrics.MegaSelect(ctx, "{name=`HTTP GET - tempo_api_search` && kind=server}", 0, 0, f)
+	results, err := traceqlmetrics.MegaSelect(ctx, "{resource.service.name=`tempo-gateway`}", 0, 0, f)
+	// results, err := traceqlmetrics.MegaSelect(ctx, "{name=`HTTP GET - tempo_api_search` && kind=server}", 0, 0, f)
 	// results, err := traceqlmetrics.MegaSelect(ctx, "{resource.cluster=`prod-us-central-0` && status=error}", 0, 0, f)
 	// results, err := traceqlmetrics.MegaSelect(ctx, "{}", 0, 0, f)
 	require.NoError(b, err)
 
-	mega := time.Since(start)
+	sorted := results.Sorted()
 
-	series := make([]traceqlmetrics.AttrValue, 0, len(results.Series))
-	for s := range results.Series {
-		series = append(series, s)
-	}
-	sort.Slice(series, func(i, j int) bool {
-		switch strings.Compare(series[i].Key.String(), series[j].Key.String()) {
-		case -1:
-			return true
-		case 0:
-			return strings.Compare(series[i].Value.String(), series[j].Value.String()) == -1
-		default:
-			return false
+	for _, timeseries := range sorted {
+		l := timeseries.Label
+		fmt.Println("Series", l.Key, "=", l.Value.String())
+
+		allts := make([]uint32, 0, len(timeseries.Timestamps))
+		for ts := range timeseries.Timestamps {
+			allts = append(allts, ts)
 		}
-	})
 
-	sort := time.Since(start) - mega
+		sort.Slice(allts, func(i, j int) bool { return allts[i] < allts[j] })
 
-	for _, s := range series {
-		h := results.Series[s]
-		// if h.Count() > 2 {
-		fmt.Println("Series", s.Key, "=", s.Value.String(), "count=", h.Count(), "p95 = ", time.Duration(h.Percentile(0.95)))
-		//}
+		for _, ts := range allts {
+			h := timeseries.Timestamps[ts]
+
+			fmt.Println("  ", time.Unix(int64(ts), 0), "count=", h.Count(), "p95=", time.Duration(h.Percentile(0.95)))
+		}
 	}
-
-	print := time.Since(start) - mega - sort
-
-	fmt.Println("Duration: mega:", mega, "sort:", sort, "print", print)
 }
