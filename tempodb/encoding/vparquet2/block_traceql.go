@@ -1167,6 +1167,7 @@ func createResourceIterator(makeIter makeIterFn, spanIterator parquetquery.Itera
 	batchCol := &batchCollector{
 		requireAtLeastOneMatchOverall: requireAtLeastOneMatchOverall,
 		minAttributes:                 minCount,
+		resAttrs:                      map[traceql.Attribute]traceql.Static{},
 	}
 
 	var required []parquetquery.Iterator
@@ -1721,6 +1722,8 @@ type batchCollector struct {
 	// shared static spans used in KeepGroup. done for memory savings, but won't
 	// work if the batchCollector is accessed concurrently
 	buffer []*span
+
+	resAttrs map[traceql.Attribute]traceql.Static
 }
 
 var _ parquetquery.GroupPredicate = (*batchCollector)(nil)
@@ -1737,7 +1740,11 @@ func (c *batchCollector) KeepGroup(res *parquetquery.IteratorResult) bool {
 	// and filter out spans that didn't match anything.
 	c.buffer = c.buffer[:0]
 
-	resAttrs := make(map[traceql.Attribute]traceql.Static)
+	// resAttrs := make(map[traceql.Attribute]traceql.Static)
+	for k := range c.resAttrs {
+		delete(c.resAttrs, k)
+	}
+
 	for _, kv := range res.OtherEntries {
 		if span, ok := kv.Value.(*span); ok {
 			c.buffer = append(c.buffer, span)
@@ -1745,7 +1752,7 @@ func (c *batchCollector) KeepGroup(res *parquetquery.IteratorResult) bool {
 		}
 
 		// Attributes show up here
-		resAttrs[newResAttr(kv.Key)] = kv.Value.(traceql.Static)
+		c.resAttrs[newResAttr(kv.Key)] = kv.Value.(traceql.Static)
 	}
 
 	// Throw out batches without any spans
@@ -1757,20 +1764,20 @@ func (c *batchCollector) KeepGroup(res *parquetquery.IteratorResult) bool {
 	for _, e := range res.Entries {
 		switch e.Value.Kind() {
 		case parquet.Int64:
-			resAttrs[newResAttr(e.Key)] = traceql.NewStaticInt(int(e.Value.Int64()))
+			c.resAttrs[newResAttr(e.Key)] = traceql.NewStaticInt(int(e.Value.Int64()))
 		case parquet.ByteArray:
-			resAttrs[newResAttr(e.Key)] = traceql.NewStaticString(e.Value.String())
+			c.resAttrs[newResAttr(e.Key)] = traceql.NewStaticString(e.Value.String())
 		}
 	}
 
 	if c.minAttributes > 0 {
-		if len(resAttrs) < c.minAttributes {
+		if len(c.resAttrs) < c.minAttributes {
 			return false
 		}
 	}
 
 	// Copy resource-level attributes to the individual spans now
-	for k, v := range resAttrs {
+	for k, v := range c.resAttrs {
 		for _, span := range c.buffer {
 			if _, alreadyExists := span.attributes[k]; !alreadyExists {
 				span.attributes[k] = v
