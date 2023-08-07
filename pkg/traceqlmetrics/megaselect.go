@@ -8,7 +8,31 @@ import (
 	"github.com/pkg/errors"
 )
 
-func MegaSelect(ctx context.Context, query string, start, end uint64, fetcher traceql.SpansetFetcher) (*MetricsResults, error) {
+type AttrValue struct {
+	Key   traceql.Attribute
+	Value traceql.Static
+}
+
+type GrubbleResults struct {
+	Series map[AttrValue]*LatencyHistogram
+}
+
+func NewGrubbleResults() *GrubbleResults {
+	return &GrubbleResults{
+		Series: map[AttrValue]*LatencyHistogram{},
+	}
+}
+
+func (m *GrubbleResults) Record(v AttrValue, durationNanos uint64) {
+	s := m.Series[v]
+	if s == nil {
+		s = &LatencyHistogram{}
+		m.Series[v] = s
+	}
+	s.Record(durationNanos)
+}
+
+func MegaSelect(ctx context.Context, query string, start, end uint64, fetcher traceql.SpansetFetcher) (*GrubbleResults, error) {
 	eval, req, err := traceql.NewEngine().Compile(query)
 	if err != nil {
 		return nil, errors.Wrap(err, "compiling query")
@@ -68,7 +92,7 @@ func MegaSelect(ctx context.Context, query string, start, end uint64, fetcher tr
 
 	defer res.Results.Close()
 
-	results := NewMetricsResults()
+	results := NewGrubbleResults()
 
 	for {
 		ss, err := res.Results.Next(ctx)
@@ -84,7 +108,7 @@ func MegaSelect(ctx context.Context, query string, start, end uint64, fetcher tr
 			for k, v := range s.Attributes() {
 				// fmt.Println("  ", k, v)
 				if k != duration {
-					results.Record(MetricSeries{KeyValue{Key: k.String(), Value: v}}, s.DurationNanos(), false)
+					results.Record(AttrValue{k, v}, s.DurationNanos())
 				}
 			}
 		}

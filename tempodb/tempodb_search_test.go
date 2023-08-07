@@ -1205,18 +1205,20 @@ func TestMegaSelect(b *testing.T) {
 
 	start := time.Now()
 
-	results, err := traceqlmetrics.MegaSelect(ctx, "{resource.service.name=`tempo-gateway`}", 0, 0, f)
+	// results, err := traceqlmetrics.MegaSelect(ctx, "{resource.service.name=`tempo-gateway`}", 0, 0, f)
+	results, err := traceqlmetrics.MegaSelect(ctx, "{name=`HTTP GET - tempo_api_search` && kind=server}", 0, 0, f)
 	// results, err := traceqlmetrics.MegaSelect(ctx, "{resource.cluster=`prod-us-central-0` && status=error}", 0, 0, f)
+	// results, err := traceqlmetrics.MegaSelect(ctx, "{}", 0, 0, f)
 	require.NoError(b, err)
 
 	mega := time.Since(start)
 
-	series := make([]traceqlmetrics.KeyValue, 0, len(results.Series))
+	series := make([]traceqlmetrics.AttrValue, 0, len(results.Series))
 	for s := range results.Series {
-		series = append(series, s[0])
+		series = append(series, s)
 	}
 	sort.Slice(series, func(i, j int) bool {
-		switch strings.Compare(series[i].Key, series[j].Key) {
+		switch strings.Compare(series[i].Key.String(), series[j].Key.String()) {
 		case -1:
 			return true
 		case 0:
@@ -1229,10 +1231,10 @@ func TestMegaSelect(b *testing.T) {
 	sort := time.Since(start) - mega
 
 	for _, s := range series {
-		h := results.Series[traceqlmetrics.MetricSeries{s}]
-		if h.Count() > 2 {
-			fmt.Println("Series", s.Key, "=", s.Value.String(), "count=", h.Count(), "p95 = ", time.Duration(h.Percentile(0.95)))
-		}
+		h := results.Series[s]
+		// if h.Count() > 2 {
+		fmt.Println("Series", s.Key, "=", s.Value.String(), "count=", h.Count(), "p95 = ", time.Duration(h.Percentile(0.95)))
+		//}
 	}
 
 	print := time.Since(start) - mega - sort
