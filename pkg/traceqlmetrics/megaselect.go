@@ -40,6 +40,34 @@ func (ts *GrubbleTimeSeries) Record(timestamp uint32, durationNanos uint64) {
 	s.Record(durationNanos)
 }
 
+func (ts *GrubbleTimeSeries) Combine(other *GrubbleTimeSeries) {
+	for timestamp, otherh := range other.Timestamps {
+		h := ts.Timestamps[timestamp]
+		if h == nil {
+			h = &LatencyHistogram{}
+			ts.Timestamps[timestamp] = h
+		}
+		h.Combine(*otherh)
+	}
+}
+
+func (ts *GrubbleTimeSeries) PercentileVector(p float64) ([]uint32, []uint64) {
+	timestamps := make([]uint32, 0, len(ts.Timestamps))
+	for i := range ts.Timestamps {
+		timestamps = append(timestamps, i)
+	}
+	sort.Slice(timestamps, func(i, j int) bool {
+		return timestamps[i] < timestamps[j]
+	})
+
+	percentiles := make([]uint64, 0, len(ts.Timestamps))
+	for _, i := range timestamps {
+		percentiles = append(percentiles, ts.Timestamps[i].Percentile(p))
+	}
+
+	return timestamps, percentiles
+}
+
 type GrubbleResults struct {
 	Series map[Label]*GrubbleTimeSeries
 }
@@ -58,6 +86,27 @@ func (m *GrubbleResults) Record(v Label, timestamp uint32, durationNanos uint64)
 		m.Series[v] = s
 	}
 	s.Record(timestamp, durationNanos)
+}
+
+func (m *GrubbleResults) Combine(other *GrubbleResults) {
+	for l, otherSeries := range other.Series {
+		s := m.Series[l]
+		if s == nil {
+			s = NewGrubbleTimeSeries(l)
+			m.Series[l] = s
+		}
+		s.Combine(otherSeries)
+	}
+}
+
+func (m *GrubbleResults) CombineTimeseries(other *GrubbleTimeSeries) {
+	l := other.Label
+	s := m.Series[l]
+	if s == nil {
+		s = NewGrubbleTimeSeries(l)
+		m.Series[l] = s
+	}
+	s.Combine(other)
 }
 
 func (m *GrubbleResults) Sorted() []*GrubbleTimeSeries {

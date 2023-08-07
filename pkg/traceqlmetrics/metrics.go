@@ -15,11 +15,11 @@ import (
 const maxBuckets = 64
 
 type LatencyHistogram struct {
-	buckets [maxBuckets]int // Exponential buckets, powers of 2
+	Buckets [maxBuckets]int // Exponential buckets, powers of 2
 }
 
 func New(buckets [maxBuckets]int) *LatencyHistogram {
-	return &LatencyHistogram{buckets: buckets}
+	return &LatencyHistogram{Buckets: buckets}
 }
 
 func (m *LatencyHistogram) Record(durationNanos uint64) {
@@ -32,20 +32,20 @@ func (m *LatencyHistogram) Record(durationNanos uint64) {
 		bucket = maxBuckets - 1
 	}
 
-	m.buckets[bucket]++
+	m.Buckets[bucket]++
 }
 
 func (m *LatencyHistogram) Count() int {
 	total := 0
-	for _, count := range m.buckets {
+	for _, count := range m.Buckets {
 		total += count
 	}
 	return total
 }
 
 func (m *LatencyHistogram) Combine(other LatencyHistogram) {
-	for i := range m.buckets {
-		m.buckets[i] += other.buckets[i]
+	for i := range m.Buckets {
+		m.Buckets[i] += other.Buckets[i]
 	}
 }
 
@@ -66,7 +66,7 @@ func (m *LatencyHistogram) Percentile(p float64) uint64 {
 	// and the total sample count less than or equal
 	// to that bucket.
 	var total, bucket int
-	for b, count := range m.buckets {
+	for b, count := range m.Buckets {
 		if total+count <= maxSamples {
 			bucket = b
 			total += count
@@ -84,7 +84,7 @@ func (m *LatencyHistogram) Percentile(p float64) uint64 {
 	// 0.5 means halfway
 	var interp float64
 	if maxSamples-total > 0 {
-		interp = float64(maxSamples-total) / float64(m.buckets[bucket+1])
+		interp = float64(maxSamples-total) / float64(m.Buckets[bucket+1])
 	}
 
 	// Exponential interpolation between buckets
@@ -95,9 +95,9 @@ func (m *LatencyHistogram) Percentile(p float64) uint64 {
 }
 
 // Buckets returns the bucket counts for each power of 2.
-func (m *LatencyHistogram) Buckets() [64]int {
-	return m.buckets
-}
+//func (m *LatencyHistogram) Buckets() [64]int {
+//	return m.buckets
+//}
 
 const maxGroupBys = 5
 

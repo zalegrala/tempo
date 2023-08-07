@@ -3,7 +3,6 @@ package querier
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"net/http"
 	"sort"
 	"sync"
@@ -704,81 +703,33 @@ func (q *Querier) SpanMetricsSummary(
 func (q *Querier) SpanMetricsMegaSelect(ctx context.Context, req *tempopb.SpanMetricsMegaSelectRequest) (*tempopb.SpanMetricsMegaSelectResponse, error) {
 	// TODO: somehow ask the generators for mega select metrics
 
-	// genReq := &tempopb.SpanMetricsRequest{
-	// 	Query:   req.Query,
-	// 	GroupBy: req.GroupBy, // pass * or something to indicate all?
-	// 	Start:   req.Start,
-	// 	End:     req.End,
-	// 	Limit:   0,
-	// }
-
 	// // Get results from all generators
-	// replicationSet, err := q.generatorRing.GetReplicationSetForOperation(ring.Read)
-	// if err != nil {
-	// 	return nil, errors.Wrap(err, "error finding generators in Querier.SpanMetricsSummary")
-	// }
-	// lookupResults, err := q.forGivenGenerators(
-	// 	ctx,
-	// 	replicationSet,
-	// 	func(ctx context.Context, client tempopb.MetricsGeneratorClient) (interface{}, error) {
-	// 		return client.GetMetrics(ctx, genReq)
-	// 	},
-	// )
-	// if err != nil {
-	// 	return nil, errors.Wrap(err, "error querying generators in Querier.SpanMetricsSummary")
-	// }
+	replicationSet, err := q.generatorRing.GetReplicationSetForOperation(ring.Read)
+	if err != nil {
+		return nil, errors.Wrap(err, "error finding generators in Querier.SpanMetricsSummary")
+	}
+	lookupResults, err := q.forGivenGenerators(
+		ctx,
+		replicationSet,
+		func(ctx context.Context, client tempopb.MetricsGeneratorClient) (interface{}, error) {
+			return client.MegaSelect(ctx, req)
+		},
+	)
+	if err != nil {
+		return nil, errors.Wrap(err, "error querying generators in Querier.SpanMetricsSummary")
+	}
 
-	// // Assemble the results from the generators in the pool
-	// results := make([]*tempopb.SpanMetricsResponse, 0, len(lookupResults))
-	// for _, result := range lookupResults {
-	// 	results = append(results, result.response.(*tempopb.SpanMetricsResponse))
-	// }
+	// // Assemble the rawResults from the generators in the pool
 
-	// // Combine the results
-	// yyy := make(map[traceqlmetrics.MetricSeries]*traceqlmetrics.LatencyHistogram)
-	// xxx := make(map[traceqlmetrics.MetricSeries]*tempopb.SpanMetricsSummary)
+	allResults := traceqlmetrics.NewGrubbleResults()
 
-	// var h *traceqlmetrics.LatencyHistogram
-	// var s traceqlmetrics.MetricSeries
-	// for _, r := range results {
-	// 	for _, m := range r.Metrics {
-	// 		s = protoToMetricSeries(m.Series)
+	for _, result := range lookupResults {
+		rawResults := result.response.(*tempopb.MegaSelectRawResponse)
 
-	// 		if _, ok := xxx[s]; !ok {
-	// 			xxx[s] = &tempopb.SpanMetricsSummary{Series: m.Series}
-	// 		}
-
-	// 		xxx[s].ErrorSpanCount += m.Errors
-
-	// 		var b [64]int
-	// 		for _, l := range m.GetLatencyHistogram() {
-	// 			// Reconstitude the bucket
-	// 			b[l.Bucket] += int(l.Count)
-	// 			// Add to the total
-	// 			xxx[s].SpanCount += l.Count
-	// 		}
-
-	// 		// Combine the histogram
-	// 		h = traceqlmetrics.New(b)
-	// 		if _, ok := yyy[s]; !ok {
-	// 			yyy[s] = h
-	// 		} else {
-	// 			yyy[s].Combine(*h)
-	// 		}
-	// 	}
-	// }
-
-	// for s, h := range yyy {
-	// 	xxx[s].P50 = h.Percentile(0.5)
-	// 	xxx[s].P90 = h.Percentile(0.9)
-	// 	xxx[s].P95 = h.Percentile(0.95)
-	// 	xxx[s].P99 = h.Percentile(0.99)
-	// }
-
-	// resp := &tempopb.SpanMetricsSummaryResponse{}
-	// for _, x := range xxx {
-	// 	resp.Summaries = append(resp.Summaries, x)
-	// }
+		for _, rawSeries := range rawResults.Series {
+			allResults.CombineTimeseries(protoToGrubbleRawSeries(rawSeries))
+		}
+	}
 
 	resp := &tempopb.SpanMetricsMegaSelectResponse{
 		Status: "success",
@@ -789,7 +740,7 @@ func (q *Querier) SpanMetricsMegaSelect(ctx context.Context, req *tempopb.SpanMe
 	}
 
 	// add some fake series
-	resp.Data.Result = []*tempopb.SpanMetricsMegaSelectResult{
+	/*resp.Data.Result = []*tempopb.SpanMetricsMegaSelectResult{
 		{
 			LabelName:  "", // this is the primary series
 			LabelValue: "",
@@ -828,6 +779,34 @@ func (q *Querier) SpanMetricsMegaSelect(ctx context.Context, req *tempopb.SpanMe
 
 			r.Ts = append(r.Ts, ts)
 		}
+	}*/
+
+	var percentile float64
+	switch req.Metric {
+	case tempopb.SpanMetricsMegaSelectRequest_P50:
+		percentile = 0.5
+	case tempopb.SpanMetricsMegaSelectRequest_P90:
+		percentile = 0.9
+	case tempopb.SpanMetricsMegaSelectRequest_P99:
+		percentile = 0.99
+	}
+
+	sortedSeries := allResults.Sorted()
+	for _, series := range sortedSeries {
+		thisResult := &tempopb.SpanMetricsMegaSelectResult{}
+		thisResult.LabelName = series.Label.Key.String()
+		thisResult.LabelValue = series.Label.Value.EncodeToString(false)
+
+		ts, percentiles := series.PercentileVector(percentile)
+
+		for i := range ts {
+			thisResult.Ts = append(thisResult.Ts, &tempopb.SpanMetricsMegaSelectResultPoint{
+				Time: ts[i],
+				Val:  time.Duration(int64(percentiles[i])).Seconds(),
+			})
+		}
+
+		resp.Data.Result = append(resp.Data.Result, thisResult)
 	}
 
 	return resp, nil
@@ -958,23 +937,52 @@ func (q *Querier) postProcessIngesterSearchResults(req *tempopb.SearchRequest, r
 func protoToMetricSeries(proto []*tempopb.KeyValue) traceqlmetrics.MetricSeries {
 	r := traceqlmetrics.MetricSeries{}
 	for i := range proto {
-		r[i] = protoToTraceQLStatic(proto[i])
+		r[i] = protoToKeyValue(proto[i])
 	}
 	return r
 }
 
-func protoToTraceQLStatic(proto *tempopb.KeyValue) traceqlmetrics.KeyValue {
+func protoToKeyValue(proto *tempopb.KeyValue) traceqlmetrics.KeyValue {
 	return traceqlmetrics.KeyValue{
-		Key: proto.Key,
-		Value: traceql.Static{
-			Type:   traceql.StaticType(proto.Value.Type),
-			N:      int(proto.Value.N),
-			F:      proto.Value.F,
-			S:      proto.Value.S,
-			B:      proto.Value.B,
-			D:      time.Duration(proto.Value.D),
-			Status: traceql.Status(proto.Value.Status),
-			Kind:   traceql.Kind(proto.Value.Kind),
-		},
+		Key:   proto.Key,
+		Value: protoToTraceQLStatic(proto.Value),
 	}
+}
+
+func protoToTraceQLStatic(proto *tempopb.TraceQLStatic) traceql.Static {
+	return traceql.Static{
+		Type:   traceql.StaticType(proto.Type),
+		N:      int(proto.N),
+		F:      proto.F,
+		S:      proto.S,
+		B:      proto.B,
+		D:      time.Duration(proto.D),
+		Status: traceql.Status(proto.Status),
+		Kind:   traceql.Kind(proto.Kind),
+	}
+}
+
+func protoToGrubbleRawSeries(proto *tempopb.MegaSelectRawSeries) *traceqlmetrics.GrubbleTimeSeries {
+	out := traceqlmetrics.NewGrubbleTimeSeries(protoToLabel(proto.Label))
+
+	for _, ts := range proto.Timeseries {
+		out.Timestamps[ts.Time] = protoToHistogram(ts.LatencyHistogram)
+	}
+
+	return out
+}
+
+func protoToLabel(proto *tempopb.KeyValue) traceqlmetrics.Label {
+	return traceqlmetrics.Label{
+		Key:   traceql.MustParseIdentifier(proto.Key),
+		Value: protoToTraceQLStatic(proto.Value),
+	}
+}
+
+func protoToHistogram(proto []*tempopb.RawHistogram) *traceqlmetrics.LatencyHistogram {
+	out := &traceqlmetrics.LatencyHistogram{}
+	for _, h := range proto {
+		out.Buckets[h.Bucket] += int(h.Count)
+	}
+	return out
 }

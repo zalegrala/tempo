@@ -376,6 +376,18 @@ func (i *instance) GetMetrics(ctx context.Context, req *tempopb.SpanMetricsReque
 	return nil, fmt.Errorf("localblocks processor not found")
 }
 
+func (i *instance) MegaSelect(ctx context.Context, req *tempopb.SpanMetricsMegaSelectRequest) (resp *tempopb.MegaSelectRawResponse, err error) {
+	for _, processor := range i.processors {
+		switch p := processor.(type) {
+		case *localblocks.Processor:
+			return p.MegaSelect(ctx, req)
+		default:
+		}
+	}
+
+	return nil, fmt.Errorf("localblocks processor not found")
+}
+
 func (i *instance) updatePushMetrics(bytesIngested int, spanCount int, expiredSpanCount int) {
 	metricBytesIngested.WithLabelValues(i.instanceID).Add(float64(bytesIngested))
 	metricSpansIngested.WithLabelValues(i.instanceID).Add(float64(spanCount))

@@ -338,3 +338,18 @@ func (g *Generator) GetMetrics(ctx context.Context, req *tempopb.SpanMetricsRequ
 
 	return instance.GetMetrics(ctx, req)
 }
+
+func (g *Generator) MegaSelect(ctx context.Context, req *tempopb.SpanMetricsMegaSelectRequest) (*tempopb.MegaSelectRawResponse, error) {
+	instanceID, err := user.ExtractOrgID(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// return empty if we don't have an instance
+	instance, ok := g.getInstanceByID(instanceID)
+	if !ok || instance == nil {
+		return &tempopb.MegaSelectRawResponse{}, nil
+	}
+
+	return instance.MegaSelect(ctx, req)
+}

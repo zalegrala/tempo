@@ -15,6 +15,7 @@ service Pusher {
 service MetricsGenerator {
   rpc PushSpans(PushSpansRequest) returns (PushResponse) {};
   rpc GetMetrics(SpanMetricsRequest) returns (SpanMetricsResponse) {};
+  rpc MegaSelect(SpanMetricsMegaSelectRequest) returns (MegaSelectRawResponse) {};
 }
 
 service Querier {
@@ -305,4 +306,18 @@ message SpanMetricsMegaSelectResult {
 message SpanMetricsMegaSelectResultPoint {
   uint32 time = 1;
   double val = 2; 
+}
+
+message MegaSelectRawHistogram {
+    uint32 time = 1;
+    repeated RawHistogram latency_histogram = 2;
+}
+
+message MegaSelectRawSeries {
+  KeyValue label = 1;
+  repeated MegaSelectRawHistogram timeseries = 2;
+}
+
+message MegaSelectRawResponse {
+  repeated MegaSelectRawSeries series = 1;
 }

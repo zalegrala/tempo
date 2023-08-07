@@ -335,7 +335,7 @@ func (p *Processor) GetMetrics(ctx context.Context, req *tempopb.SpanMetricsRequ
 	for series, hist := range m.Series {
 		h := []*tempopb.RawHistogram{}
 
-		for bucket, count := range hist.Buckets() {
+		for bucket, count := range hist.Buckets {
 			if count != 0 {
 				rawHistorgram = &tempopb.RawHistogram{
 					Bucket: uint64(bucket),
@@ -632,21 +632,28 @@ func metricSeriesToProto(series traceqlmetrics.MetricSeries) []*tempopb.KeyValue
 	var r []*tempopb.KeyValue
 	for _, kv := range series {
 		if kv.Key != "" {
-			static := kv.Value
-			r = append(r, &tempopb.KeyValue{
-				Key: kv.Key,
-				Value: &tempopb.TraceQLStatic{
-					Type:   int32(static.Type),
-					N:      int64(static.N),
-					F:      static.F,
-					S:      static.S,
-					B:      static.B,
-					D:      uint64(static.D),
-					Status: int32(static.Status),
-					Kind:   int32(static.Kind),
-				},
-			})
+			r = append(r, labelToProto(kv))
 		}
 	}
 	return r
+}
+
+func labelToProto(kv traceqlmetrics.KeyValue) *tempopb.KeyValue {
+	return &tempopb.KeyValue{
+		Key:   kv.Key,
+		Value: staticToProto(kv.Value),
+	}
+}
+
+func staticToProto(static traceql.Static) *tempopb.TraceQLStatic {
+	return &tempopb.TraceQLStatic{
+		Type:   int32(static.Type),
+		N:      int64(static.N),
+		F:      static.F,
+		S:      static.S,
+		B:      static.B,
+		D:      uint64(static.D),
+		Status: int32(static.Status),
+		Kind:   int32(static.Kind),
+	}
 }
