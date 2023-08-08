@@ -973,8 +973,12 @@ func protoToGrubbleRawSeries(proto *tempopb.MegaSelectRawSeries) *traceqlmetrics
 }
 
 func protoToLabel(proto *tempopb.KeyValue) traceqlmetrics.Label {
+	var key traceql.Attribute
+	if proto.Key != "" {
+		key = traceql.MustParseIdentifier(proto.Key)
+	}
 	return traceqlmetrics.Label{
-		Key:   traceql.MustParseIdentifier(proto.Key),
+		Key:   key,
 		Value: protoToTraceQLStatic(proto.Value),
 	}
 }

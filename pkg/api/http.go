@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -430,6 +431,25 @@ func ParseSpanMetricsMegaSelectRequest(r *http.Request) (*tempopb.SpanMetricsMeg
 	query := r.URL.Query().Get(urlParamQuery)
 	req.Query = query
 
+	// Prometheus params
+	if q2 := r.URL.Query().Get("query"); q2 != "" {
+		req.Query = q2
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > 0 {
+		v, err := url.ParseQuery(string(body))
+		if err != nil {
+			return nil, err
+		}
+		if q2 := v.Get("query"); q2 != "" {
+			req.Query = q2
+		}
+	}
+	// fmt.Println(string(body))
+
 	if s, ok := extractQueryParam(r, urlParamStart); ok {
 		start, err := strconv.ParseInt(s, 10, 32)
 		if err != nil {
@@ -457,7 +477,8 @@ func ParseSpanMetricsMegaSelectRequest(r *http.Request) (*tempopb.SpanMetricsMeg
 	case metric == "errorrate":
 		req.Metric = tempopb.SpanMetricsMegaSelectRequest_ERRORRATE
 	default:
-		return nil, fmt.Errorf("invalid metric: %s", metric)
+		req.Metric = tempopb.SpanMetricsMegaSelectRequest_P90
+		// return nil, fmt.Errorf("invalid metric: %s", metric)
 	}
 
 	return req, nil

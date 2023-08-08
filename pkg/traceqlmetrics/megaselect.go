@@ -207,7 +207,10 @@ func MegaSelect(ctx context.Context, query string, start, end uint64, fetcher tr
 			startTime := uint32(time.Unix(0, int64(s.StartTimeUnixNanos()/interval*interval)).Unix())
 			dur := s.DurationNanos()
 
-			// fmt.Println("Got span with attrs:")
+			// All-span series
+			results.Record(Label{}, startTime, dur)
+
+			// Per-attribute series
 			for k, v := range s.Attributes() {
 				// fmt.Println("  ", k, v)
 				if k != duration {

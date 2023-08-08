@@ -345,6 +345,7 @@ func (t *App) initQuerier() (services.Service, error) {
 
 	spanMetricsMegaSelectHandler := t.HTTPAuthMiddleware.Wrap(http.HandlerFunc(t.querier.SpanMetricsMegaSelectHandler))
 	t.Server.HTTP.Handle(path.Join(api.PathPrefixQuerier, addHTTPAPIPrefix(&t.cfg, api.PathSpanMetricsMegaSelect)), spanMetricsMegaSelectHandler)
+	t.Server.HTTP.Handle("/api/v1/query_range", spanMetricsMegaSelectHandler)
 
 	return t.querier, t.querier.CreateAndRegisterWorker(t.Server.HTTPServer.Handler)
 }
