@@ -335,8 +335,8 @@ func (q *Querier) SpanMetricsMegaSelectHandler(w http.ResponseWriter, r *http.Re
 		if result.LabelName == "" {
 			promResult.Metric["__name__"] = "mega-summary"
 		} else {
-			promResult.Metric["__name__"] = "not-mega-summary"
-			promResult.Metric[result.LabelName] = result.LabelValue
+			promResult.Metric["__name__"] = result.LabelName   // "not-mega-summary"
+			promResult.Metric["__value__"] = result.LabelValue // "not-mega-summary"
 		}
 
 		// map values
