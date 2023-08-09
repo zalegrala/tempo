@@ -749,7 +749,7 @@ func (q *Querier) SpanMetricsMegaSelect(ctx context.Context, req *tempopb.SpanMe
 		percentile = 0.99
 	}
 
-	sortedSeries := allResults.Sorted()
+	sortedSeries := allResults.SortedByRange()
 	for _, series := range sortedSeries {
 		thisResult := &tempopb.SpanMetricsMegaSelectResult{}
 		thisResult.LabelName = series.Label.Key.String()

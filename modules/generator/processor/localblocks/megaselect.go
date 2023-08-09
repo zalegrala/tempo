@@ -86,7 +86,6 @@ func (p *Processor) MegaSelect(ctx context.Context, req *tempopb.SpanMetricsMega
 		}
 
 		for timestamp, histogram := range series.Timestamps {
-
 			h := []*tempopb.RawHistogram{}
 			for bucket, count := range histogram.Buckets {
 				if count > 0 {

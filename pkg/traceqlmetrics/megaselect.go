@@ -41,6 +41,7 @@ func (ts *GrubbleTimeSeries) Record(timestamp uint32, durationNanos uint64, trac
 }
 
 func (ts *GrubbleTimeSeries) Combine(other *GrubbleTimeSeries) {
+	// ts.TotalCount += other.TotalCount
 	for timestamp, otherh := range other.Timestamps {
 		h := ts.Timestamps[timestamp]
 		if h == nil {
@@ -48,6 +49,7 @@ func (ts *GrubbleTimeSeries) Combine(other *GrubbleTimeSeries) {
 			ts.Timestamps[timestamp] = h
 		}
 		h.Combine(*otherh)
+		ts.TotalCount += otherh.Count()
 	}
 }
 
@@ -150,6 +152,78 @@ func (m *GrubbleResults) Sorted() []*GrubbleTimeSeries {
 	return all
 }
 
+func (m *GrubbleResults) SortedByCount() []*GrubbleTimeSeries {
+	sorter := &grubbleSorter{
+		data: make([]*GrubbleTimeSeries, 0, len(m.Series)),
+		less: func(a, b *GrubbleTimeSeries) bool {
+			// Sort by count descending
+			return a.TotalCount > b.TotalCount
+		},
+	}
+
+	for _, s := range m.Series {
+		sorter.data = append(sorter.data, s)
+	}
+
+	sort.Sort(sorter)
+
+	return sorter.data
+}
+
+func (m *GrubbleResults) SortedByRange() []*GrubbleTimeSeries {
+	sorter := &grubbleSorter{
+		data: make([]*GrubbleTimeSeries, 0, len(m.Series)),
+		less: func(a, b *GrubbleTimeSeries) bool {
+			var (
+				minA = maxBuckets
+				minB = maxBuckets
+				maxA = 0
+				maxB = 0
+			)
+
+			for _, ts := range a.Timestamps {
+				for bucket, count := range ts.Buckets {
+					if count > 0 {
+						if bucket < minA {
+							minA = bucket
+						}
+						if bucket > maxA {
+							maxA = bucket
+						}
+					}
+				}
+			}
+
+			for _, ts := range b.Timestamps {
+				for bucket, count := range ts.Buckets {
+					if count > 0 {
+						if bucket < minB {
+							minB = bucket
+						}
+						if bucket > maxB {
+							maxB = bucket
+						}
+					}
+				}
+			}
+
+			rangeA := maxA - minA
+			rangeB := maxB - minB
+
+			// Sort by data point range descending
+			return rangeA > rangeB
+		},
+	}
+
+	for _, s := range m.Series {
+		sorter.data = append(sorter.data, s)
+	}
+
+	sort.Sort(sorter)
+
+	return sorter.data
+}
+
 func MegaSelect(ctx context.Context, query string, start, end uint64, fetcher traceql.SpansetFetcher) (*GrubbleResults, error) {
 	eval, req, err := traceql.NewEngine().Compile(query)
 	if err != nil {
@@ -244,4 +318,23 @@ func MegaSelect(ctx context.Context, query string, start, end uint64, fetcher tr
 	}
 
 	return results, nil
+}
+
+type grubbleSorter struct {
+	data []*GrubbleTimeSeries
+	less func(a, b *GrubbleTimeSeries) bool
+}
+
+var _ sort.Interface = (*grubbleSorter)(nil)
+
+func (s *grubbleSorter) Len() int {
+	return len(s.data)
+}
+
+func (s *grubbleSorter) Less(i, j int) bool {
+	return s.less(s.data[i], s.data[j])
+}
+
+func (s *grubbleSorter) Swap(i, j int) {
+	s.data[i], s.data[j] = s.data[j], s.data[i]
 }
