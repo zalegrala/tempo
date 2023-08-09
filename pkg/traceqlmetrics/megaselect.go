@@ -2,6 +2,7 @@ package traceqlmetrics
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -224,6 +225,33 @@ func (m *GrubbleResults) SortedByRange() []*GrubbleTimeSeries {
 	return sorter.data
 }
 
+func intervalForTimeRange(start, end uint64) time.Duration {
+	if start == 0 || end == 0 {
+		// This means all available data
+		return time.Minute
+	}
+
+	delta := time.Duration(end - start)
+
+	// Try to get this many data points
+	// Our baseline is is 1 hour @ 30s intervals
+	baseline := delta / 60
+
+	// Round down in intervals of 5s
+	interval := baseline / (5 * time.Second) * (5 * time.Second)
+
+	if interval < 5*time.Second {
+		// Round down in intervals of 1s
+		interval = baseline / time.Second * time.Second
+	}
+
+	if interval < time.Second {
+		return time.Second
+	}
+
+	return interval
+}
+
 func MegaSelect(ctx context.Context, query string, start, end uint64, fetcher traceql.SpansetFetcher) (*GrubbleResults, error) {
 	eval, req, err := traceql.NewEngine().Compile(query)
 	if err != nil {
@@ -236,11 +264,15 @@ func MegaSelect(ctx context.Context, query string, start, end uint64, fetcher tr
 		startTime  = traceql.NewIntrinsic(traceql.IntrinsicSpanStartTime)
 		startValue = traceql.NewStaticInt(int(start))
 		status     = traceql.NewIntrinsic(traceql.IntrinsicStatus)
-		interval   = uint64(time.Minute)
+		// interval   = uint64(time.Minute)
+		interval = uint64(intervalForTimeRange(start, end))
+
 		// statusErr  = traceql.NewStaticStatus(traceql.StatusError)
 		// spanCount  = 0
 		// results    = NewMetricsResults()
 	)
+
+	fmt.Println("Time range:", time.Duration(end-start), "interval", time.Duration(interval))
 
 	if start > 0 {
 		req.StartTimeUnixNanos = start
