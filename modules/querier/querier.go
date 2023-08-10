@@ -749,8 +749,37 @@ func (q *Querier) SpanMetricsMegaSelect(ctx context.Context, req *tempopb.SpanMe
 		percentile = 0.99
 	}
 
+	// Record all combinations of key=value
+	distinctness := map[traceql.Attribute]map[traceqlmetrics.Label]struct{}{}
+	for k := range allResults.Series {
+		values := distinctness[k.Key]
+		if values == nil {
+			values = map[traceqlmetrics.Label]struct{}{}
+			distinctness[k.Key] = values
+		}
+		values[k] = struct{}{}
+	}
+
+	// Delete series with only 1 distinct value
+	// except the mega summary which has no name
+	for k := range distinctness {
+		labels := distinctness[k]
+		if len(labels) == 1 && k.Name != "" {
+			for l := range labels {
+				delete(allResults.Series, l)
+				delete(distinctness, k)
+				fmt.Println("Deleting single series", l.Key.String(), "=", l.Value.EncodeToString(false))
+			}
+		}
+	}
+
+	/*for k,labels := range distinctness {
+
+	}*/
+
 	sortedSeries := allResults.SortedByRange()
 	for _, series := range sortedSeries {
+
 		thisResult := &tempopb.SpanMetricsMegaSelectResult{}
 		thisResult.LabelName = series.Label.Key.String()
 		thisResult.LabelValue = series.Label.Value.EncodeToString(false)
