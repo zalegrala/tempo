@@ -777,7 +777,7 @@ func (q *Querier) SpanMetricsMegaSelect(ctx context.Context, req *tempopb.SpanMe
 
 	}*/
 
-	sortedSeries := allResults.SortedByRange()
+	sortedSeries := allResults.SortedByName()
 	for _, series := range sortedSeries {
 
 		thisResult := &tempopb.SpanMetricsMegaSelectResult{}

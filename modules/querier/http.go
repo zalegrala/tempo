@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"strconv"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/grafana/tempo/pkg/util"
 	"github.com/opentracing/opentracing-go"
 	ot_log "github.com/opentracing/opentracing-go/log"
+	"github.com/segmentio/fasthash/fnv1a"
 )
 
 const (
@@ -340,6 +342,8 @@ func (q *Querier) SpanMetricsMegaSelectHandler(w http.ResponseWriter, r *http.Re
 			promResult.Metric["__value__"] = result.LabelValue // "not-mega-summary"
 		}
 
+		baseSeed := fnv1a.HashString64(result.LabelValue)
+
 		promResult.Values = make([]interface{}, 0, len(result.Ts))
 		promResult.Exemplars = make([]interface{}, 0, len(result.Ts))
 
@@ -350,7 +354,8 @@ func (q *Querier) SpanMetricsMegaSelectHandler(w http.ResponseWriter, r *http.Re
 				strconv.FormatFloat(ts.Val, 'f', -1, 64), // making assumptions about the float format returned from prom
 			})
 
-			if len(ts.ExemplarTraceID) > 0 {
+			wangoZeeTango := rand.New(rand.NewSource(int64(baseSeed + uint64(ts.Time))))
+			if len(ts.ExemplarTraceID) > 0 && (wangoZeeTango.Int31n(20) == 0 || time.Duration(ts.ExemplarDuration).Seconds() > 2) {
 				promResult.Exemplars = append(promResult.Exemplars, []interface{}{
 					float64(ts.Time), // float for timestamp. assume it's seconds
 					strconv.FormatFloat(time.Duration(ts.ExemplarDuration).Seconds(), 'f', -1, 64),

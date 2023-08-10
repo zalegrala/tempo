@@ -42,8 +42,10 @@ func (m *LatencyHistogram) RecordExemplar(durationNanos uint64, traceID []byte) 
 	m.Record(durationNanos)
 
 	// just always overwrite. we don't need more than one per ts
-	m.ExemplarDurationNano = durationNanos
-	m.ExemplarTraceID = traceID
+	if durationNanos > m.ExemplarDurationNano {
+		m.ExemplarDurationNano = durationNanos
+		m.ExemplarTraceID = traceID
+	}
 }
 
 func (m *LatencyHistogram) Count() int {

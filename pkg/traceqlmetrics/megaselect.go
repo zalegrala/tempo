@@ -225,6 +225,23 @@ func (m *GrubbleResults) SortedByRange() []*GrubbleTimeSeries {
 	return sorter.data
 }
 
+func (m *GrubbleResults) SortedByName() []*GrubbleTimeSeries {
+	sorter := &grubbleSorter{
+		data: make([]*GrubbleTimeSeries, 0, len(m.Series)),
+		less: func(a, b *GrubbleTimeSeries) bool {
+			return strings.Compare(a.Label.Key.String(), b.Label.Key.String()) < 0
+		},
+	}
+
+	for _, s := range m.Series {
+		sorter.data = append(sorter.data, s)
+	}
+
+	sort.Sort(sorter)
+
+	return sorter.data
+}
+
 func intervalForTimeRange(start, end uint64) time.Duration {
 	if start == 0 || end == 0 {
 		// This means all available data
