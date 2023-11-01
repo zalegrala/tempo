@@ -35,7 +35,7 @@ func WithContext(ctx context.Context, l kitlog.Logger) kitlog.Logger {
 		l = WithUserID(userID, l)
 	}
 
-	traceID, ok := tracing.ExtractSampledTraceID(ctx)
+	traceID, ok := tracing.ExtractOtelSampledTraceID(ctx)
 	if !ok {
 		return l
 	}

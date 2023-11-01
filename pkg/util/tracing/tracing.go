@@ -10,7 +10,7 @@ import (
 // ExtractTraceID extracts the trace id, if any from the context.
 func ExtractTraceID(ctx context.Context) (string, bool) {
 	// Extract from OpenTracing Jaeger exporter
-	traceID, ok := tracing.ExtractTraceID(ctx)
+	traceID, ok := tracing.ExtractOtelTraceID(ctx)
 	if ok {
 		return traceID, true
 	}

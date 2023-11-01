@@ -222,7 +222,7 @@ func installOpenTracingTracer(config *app.Config) (func(), error) {
 	level.Info(log.Logger).Log("msg", "initialising OpenTracing tracer")
 
 	// Setting the environment variable JAEGER_AGENT_HOST enables tracing
-	trace, err := tracing.NewFromEnv(fmt.Sprintf("%s-%s", appName, config.Target))
+	trace, err := tracing.NewOtelFromEnv(fmt.Sprintf("%s-%s", appName, config.Target))
 	if err != nil {
 		return nil, fmt.Errorf("error initialising tracer: %w", err)
 	}
