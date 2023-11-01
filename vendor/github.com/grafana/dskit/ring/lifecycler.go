@@ -615,7 +615,11 @@ func (i *Lifecycler) initRing(ctx context.Context) error {
 	}
 
 	err = i.KVStore.CAS(ctx, i.RingKey, func(in interface{}) (out interface{}, retry bool, err error) {
-		ringDesc = GetOrCreateRingDesc(in)
+		if in == nil {
+			ringDesc = NewDesc()
+		} else {
+			ringDesc = in.(*Desc)
+		}
 
 		instanceDesc, ok := ringDesc.Ingesters[i.ID]
 		if !ok {
@@ -690,7 +694,6 @@ func (i *Lifecycler) initRing(ctx context.Context) error {
 		i.setTokens(tokens)
 
 		// We're taking over this entry, update instanceDesc with our values
-		instanceDesc.Id = i.ID
 		instanceDesc.Addr = i.Addr
 		instanceDesc.Zone = i.Zone
 
@@ -722,7 +725,12 @@ func (i *Lifecycler) verifyTokens(ctx context.Context) bool {
 	result := false
 
 	err := i.KVStore.CAS(ctx, i.RingKey, func(in interface{}) (out interface{}, retry bool, err error) {
-		ringDesc := GetOrCreateRingDesc(in)
+		var ringDesc *Desc
+		if in == nil {
+			ringDesc = NewDesc()
+		} else {
+			ringDesc = in.(*Desc)
+		}
 
 		// At this point, we should have the same tokens as we have registered before
 		ringTokens, takenTokens := ringDesc.TokensFor(i.ID)
@@ -830,7 +838,11 @@ func (i *Lifecycler) autoJoin(ctx context.Context, targetState InstanceState) er
 
 	var ringDesc *Desc
 	err = i.KVStore.CAS(ctx, i.RingKey, func(in interface{}) (out interface{}, retry bool, err error) {
-		ringDesc = GetOrCreateRingDesc(in)
+		if in == nil {
+			ringDesc = NewDesc()
+		} else {
+			ringDesc = in.(*Desc)
+		}
 
 		// At this point, we should not have any tokens, and we should be in PENDING state.
 		myTokens, takenTokens := ringDesc.TokensFor(i.ID)
@@ -846,6 +858,7 @@ func (i *Lifecycler) autoJoin(ctx context.Context, targetState InstanceState) er
 		i.setTokens(myTokens)
 
 		ringDesc.AddIngester(i.ID, i.Addr, i.Zone, i.getTokens(), i.GetState(), i.getRegisteredAt())
+
 		return ringDesc, true, nil
 	})
 
@@ -863,23 +876,30 @@ func (i *Lifecycler) updateConsul(ctx context.Context) error {
 	var ringDesc *Desc
 
 	err := i.KVStore.CAS(ctx, i.RingKey, func(in interface{}) (out interface{}, retry bool, err error) {
-		ringDesc = GetOrCreateRingDesc(in)
+		if in == nil {
+			ringDesc = NewDesc()
+		} else {
+			ringDesc = in.(*Desc)
+		}
 
-		var tokens Tokens
-		instanceDesc, exists := ringDesc.Ingesters[i.ID]
+		instanceDesc, ok := ringDesc.Ingesters[i.ID]
 
-		if !exists {
+		if !ok {
 			// If the instance is missing in the ring, we need to add it back. However, due to how shuffle sharding work,
 			// the missing instance for some period of time could have cause a resharding of tenants among instances:
 			// to guarantee query correctness we need to update the registration timestamp to current time.
 			level.Info(i.logger).Log("msg", "instance is missing in the ring (e.g. the ring backend storage has been reset), registering the instance with an updated registration timestamp", "ring", i.RingName)
 			i.setRegisteredAt(time.Now())
-			tokens = i.getTokens()
+			ringDesc.AddIngester(i.ID, i.Addr, i.Zone, i.getTokens(), i.GetState(), i.getRegisteredAt())
 		} else {
-			tokens = instanceDesc.Tokens
+			instanceDesc.Timestamp = time.Now().Unix()
+			instanceDesc.State = i.GetState()
+			instanceDesc.Addr = i.Addr
+			instanceDesc.Zone = i.Zone
+			instanceDesc.RegisteredTimestamp = i.getRegisteredAt().Unix()
+			ringDesc.Ingesters[i.ID] = instanceDesc
 		}
 
-		ringDesc.AddIngester(i.ID, i.Addr, i.Zone, tokens, i.GetState(), i.getRegisteredAt())
 		return ringDesc, true, nil
 	})
 

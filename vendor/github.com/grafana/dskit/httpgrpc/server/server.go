@@ -15,23 +15,15 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/go-kit/log/level"
-	otgrpc "github.com/opentracing-contrib/go-grpc"
-	"github.com/opentracing/opentracing-go"
 	"github.com/sercand/kuberesolver/v5"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/grafana/dskit/httpgrpc"
-	"github.com/grafana/dskit/log"
 	"github.com/grafana/dskit/middleware"
-)
-
-var (
-	// DoNotLogErrorHeaderKey is a header key used for marking non-loggable errors. More precisely, if an HTTP response
-	// has a status code 5xx, and contains a header with key DoNotLogErrorHeaderKey and any values, the generated error
-	// will be marked as non-loggable.
-	DoNotLogErrorHeaderKey = http.CanonicalHeaderKey("X-DoNotLogError")
 )
 
 // Server implements HTTPServer.  HTTPServer is a generated interface that gRPC
@@ -69,18 +61,13 @@ func (s Server) Handle(ctx context.Context, r *httpgrpc.HTTPRequest) (*httpgrpc.
 
 	recorder := httptest.NewRecorder()
 	s.handler.ServeHTTP(recorder, req)
-	header := recorder.Header()
 	resp := &httpgrpc.HTTPResponse{
 		Code:    int32(recorder.Code),
-		Headers: fromHeader(header),
+		Headers: fromHeader(recorder.Header()),
 		Body:    recorder.Body.Bytes(),
 	}
 	if recorder.Code/100 == 5 {
-		err := httpgrpc.ErrorFromHTTPResponse(resp)
-		if _, ok := header[DoNotLogErrorHeaderKey]; ok {
-			err = middleware.DoNotLogError{Err: err}
-		}
-		return nil, err
+		return nil, httpgrpc.ErrorFromHTTPResponse(resp)
 	}
 	return resp, nil
 }
@@ -92,7 +79,7 @@ type Client struct {
 }
 
 // ParseURL deals with direct:// style URLs, as well as kubernetes:// urls.
-// For backwards compatibility it treats URLs without schemes as kubernetes://.
+// For backwards compatibility it treats URLs without schems as kubernetes://.
 func ParseURL(unparsed string) (string, error) {
 	// if it has :///, this is the kuberesolver v2 URL. Return it as it is.
 	if strings.Contains(unparsed, ":///") {
@@ -127,7 +114,7 @@ func ParseURL(unparsed string) (string, error) {
 		if len(parts) > 2 {
 			domain = domain + "." + parts[2]
 		}
-		address := fmt.Sprintf("kubernetes:///%s", net.JoinHostPort(service+domain, port))
+		address := fmt.Sprintf("kubernetes:///%s%s:%s", service, domain, port)
 		return address, nil
 
 	default:
@@ -149,7 +136,7 @@ func NewClient(address string) (*Client, error) {
 		grpc.WithDefaultServiceConfig(grpcServiceConfig),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithChainUnaryInterceptor(
-			otgrpc.OpenTracingClientInterceptor(opentracing.GlobalTracer()),
+			otelgrpc.UnaryClientInterceptor(),
 			middleware.ClientUserHeaderInterceptor,
 		),
 	}
@@ -199,12 +186,8 @@ func WriteError(w http.ResponseWriter, err error) {
 
 // ServeHTTP implements http.Handler
 func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if tracer := opentracing.GlobalTracer(); tracer != nil {
-		if span := opentracing.SpanFromContext(r.Context()); span != nil {
-			if err := tracer.Inject(span.Context(), opentracing.HTTPHeaders, opentracing.HTTPHeadersCarrier(r.Header)); err != nil {
-				level.Warn(log.Global()).Log("msg", "failed to inject tracing headers into request", "err", err)
-			}
-		}
+	if span := trace.SpanFromContext(r.Context()); span.SpanContext().IsValid() {
+		otelhttptrace.Inject(r.Context(), r)
 	}
 
 	req, err := HTTPRequest(r)
@@ -239,9 +222,6 @@ func toHeader(hs []*httpgrpc.Header, header http.Header) {
 func fromHeader(hs http.Header) []*httpgrpc.Header {
 	result := make([]*httpgrpc.Header, 0, len(hs))
 	for k, vs := range hs {
-		if k == DoNotLogErrorHeaderKey {
-			continue
-		}
 		result = append(result, &httpgrpc.Header{
 			Key:    k,
 			Values: vs,
