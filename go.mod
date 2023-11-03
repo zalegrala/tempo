@@ -336,4 +336,4 @@ replace github.com/hashicorp/memberlist => github.com/grafana/memberlist v0.3.1-
 
 replace golang.org/x/net => golang.org/x/net v0.17.0
 
-replace github.com/grafana/dskit => github.com/grafana/dskit v0.0.0-20230925184915-3e456e1306b2
+replace github.com/grafana/dskit => github.com/grafana/dskit v0.0.0-20231102165239-dcbb461aa086
