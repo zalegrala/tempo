@@ -614,3 +614,73 @@ func BenchmarkBackendBlockGetMetrics(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkBackendBlockGetMetrics This doesn't really belong here but I can't think of
+// a better place that has access to all of the packages, especially the backend.
+func BenchmarkBackendBlockMetricsQueryRange(b *testing.B) {
+	testCases := []struct {
+		query string
+		step  time.Duration
+	}{
+		{"{resource.service.name=`tempo-gateway`} | count_over_time() by (resource.cluster)", 30 * time.Second},
+		{"{} | rate()", time.Second},
+		{"{} | count_over_time()", time.Second},
+	}
+
+	ctx := context.TODO()
+	tenantID := "1"
+	blockID := uuid.MustParse("06ebd383-8d4e-4289-b0e9-cf2197d611d5")
+
+	r, _, _, err := local.New(&local.Config{
+		Path: path.Join("/Users/marty/src/tmp/"),
+	})
+	require.NoError(b, err)
+
+	rr := backend.NewReader(r)
+	meta, err := rr.BlockMeta(ctx, blockID, tenantID)
+	require.NoError(b, err)
+	require.Equal(b, VersionString, meta.Version)
+
+	opts := common.DefaultSearchOptions()
+
+	block := newBackendBlock(meta, rr)
+	_, _, err = block.openForSearch(ctx, opts)
+	require.NoError(b, err)
+
+	for _, tc := range testCases {
+		b.Run(tc.query+"/"+tc.step.String(), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+
+				var resp traceql.FetchSpansResponse
+				f := traceql.NewSpansetFetcherWrapper(func(ctx context.Context, req traceql.FetchSpansRequest) (traceql.FetchSpansResponse, error) {
+					var err error
+					resp, err = block.Fetch(ctx, req, opts)
+					return resp, err
+				})
+
+				e := traceql.NewEngine()
+
+				req := traceql.MetricsQueryRangeRequest{
+					Start: uint64(meta.StartTime.UnixNano()),
+					End:   uint64(meta.EndTime.UnixNano()),
+					Step:  uint64(tc.step),
+					Q:     tc.query,
+				}
+
+				r, err := e.MetricsQueryRange(ctx, req, f)
+
+				require.NoError(b, err)
+				require.NotNil(b, r)
+
+				if b.N == 1 {
+					for _, s := range r.Series {
+						fmt.Println(s.Labels)
+						fmt.Println(s.Values)
+					}
+				}
+
+				// fmt.Println("Bytes read:", humanize.Bytes(resp.Bytes()))
+			}
+		})
+	}
+}

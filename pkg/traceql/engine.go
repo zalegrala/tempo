@@ -25,18 +25,21 @@ func NewEngine() *Engine {
 	return &Engine{}
 }
 
-func (e *Engine) Compile(query string) (func(input []*Spanset) (result []*Spanset, err error), *FetchSpansRequest, error) {
+func (e *Engine) Compile(query string) (func(input []*Spanset) (result []*Spanset, err error), metricsFirstStageElement, *FetchSpansRequest, error) {
 	expr, err := Parse(query)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	req := &FetchSpansRequest{
 		AllConditions: true,
 	}
 	expr.Pipeline.extractConditions(req)
+	if expr.MetricsPipeline != nil {
+		expr.MetricsPipeline.extractConditions(req)
+	}
 
-	return expr.Pipeline.evaluate, req, nil
+	return expr.Pipeline.evaluate, expr.MetricsPipeline, req, nil
 }
 
 func (e *Engine) ExecuteSearch(ctx context.Context, searchReq *tempopb.SearchRequest, spanSetFetcher SpansetFetcher) (*tempopb.SearchResponse, error) {

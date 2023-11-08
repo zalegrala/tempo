@@ -125,6 +125,10 @@ func (a Attribute) String() string {
 	return scope + att
 }
 
+func (a MetricsAggregate) String() string {
+	return a.op.String()
+}
+
 func binaryOp(op Operator, lhs Element, rhs Element) string {
 	return wrapElement(lhs) + " " + op.String() + " " + wrapElement(rhs)
 }

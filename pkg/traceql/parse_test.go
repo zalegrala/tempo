@@ -1,12 +1,19 @@
 package traceql
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestEscapes(t *testing.T) {
+	e, err := Parse(`{ ."\"foo\""="\"\tbar\""}`)
+	require.NoError(t, err)
+	fmt.Println(e)
+}
 
 func TestPipelineErrors(t *testing.T) {
 	tests := []struct {
@@ -97,7 +104,7 @@ func TestPipelineOperatorPrecedence(t *testing.T) {
 			actual, err := Parse(tc.in)
 
 			require.NoError(t, err)
-			require.Equal(t, &RootExpr{newPipeline(tc.expected)}, actual)
+			require.Equal(t, newRootExpr(newPipeline(tc.expected)), actual)
 		})
 	}
 }
@@ -257,7 +264,7 @@ func TestPipelineSpansetOperators(t *testing.T) {
 			actual, err := Parse(tc.in)
 
 			require.NoError(t, err)
-			require.Equal(t, &RootExpr{newPipeline(tc.expected)}, actual)
+			require.Equal(t, newRootExpr(newPipeline(tc.expected)), actual)
 		})
 	}
 }
@@ -339,7 +346,7 @@ func TestPipelineScalarOperators(t *testing.T) {
 			actual, err := Parse(tc.in)
 
 			require.NoError(t, err)
-			require.Equal(t, &RootExpr{newPipeline(tc.expected)}, actual)
+			require.Equal(t, newRootExpr(newPipeline(tc.expected)), actual)
 		})
 	}
 }
@@ -379,7 +386,7 @@ func TestPipelines(t *testing.T) {
 			actual, err := Parse(tc.in)
 
 			require.NoError(t, err)
-			require.Equal(t, &RootExpr{tc.expected}, actual)
+			require.Equal(t, newRootExpr(tc.expected), actual)
 		})
 	}
 }
@@ -417,7 +424,7 @@ func TestGroupCoalesceOperation(t *testing.T) {
 			actual, err := Parse(tc.in)
 
 			require.NoError(t, err)
-			require.Equal(t, &RootExpr{tc.expected}, actual)
+			require.Equal(t, newRootExpr(tc.expected), actual)
 		})
 	}
 }
@@ -454,7 +461,7 @@ func TestSelectOperation(t *testing.T) {
 			actual, err := Parse(tc.in)
 
 			require.NoError(t, err)
-			require.Equal(t, &RootExpr{tc.expected}, actual)
+			require.Equal(t, newRootExpr(tc.expected), actual)
 		})
 	}
 }
@@ -523,7 +530,7 @@ func TestSpansetExpressionPrecedence(t *testing.T) {
 			actual, err := Parse(tc.in)
 
 			require.NoError(t, err)
-			require.Equal(t, &RootExpr{newPipeline(tc.expected)}, actual)
+			require.Equal(t, newRootExpr(newPipeline(tc.expected)), actual)
 		})
 	}
 }
@@ -554,7 +561,7 @@ func TestSpansetExpressionOperators(t *testing.T) {
 			actual, err := Parse(tc.in)
 
 			require.NoError(t, err)
-			require.Equal(t, &RootExpr{newPipeline(tc.expected)}, actual)
+			require.Equal(t, newRootExpr(newPipeline(tc.expected)), actual)
 		})
 	}
 }
@@ -611,7 +618,7 @@ func TestScalarExpressionPrecedence(t *testing.T) {
 			actual, err := Parse(tc.in)
 
 			require.NoError(t, err)
-			require.Equal(t, &RootExpr{newPipeline(tc.expected)}, actual)
+			require.Equal(t, newRootExpr(newPipeline(tc.expected)), actual)
 		})
 	}
 }
@@ -633,7 +640,7 @@ func TestScalarExpressionOperators(t *testing.T) {
 			actual, err := Parse(tc.in)
 
 			require.NoError(t, err)
-			require.Equal(t, &RootExpr{newPipeline(tc.expected)}, actual)
+			require.Equal(t, newRootExpr(newPipeline(tc.expected)), actual)
 		})
 	}
 }
@@ -772,7 +779,7 @@ func TestSpansetFilterOperatorPrecedence(t *testing.T) {
 			actual, err := Parse(tc.in)
 
 			require.NoError(t, err)
-			require.Equal(t, &RootExpr{newPipeline(newSpansetFilter(tc.expected))}, actual)
+			require.Equal(t, newRootExpr(newPipeline(newSpansetFilter(tc.expected))), actual)
 		})
 	}
 }
@@ -815,7 +822,7 @@ func TestSpansetFilterStatics(t *testing.T) {
 			actual, err := Parse(tc.in)
 
 			require.NoError(t, err)
-			require.Equal(t, &RootExpr{newPipeline(newSpansetFilter(tc.expected))}, actual)
+			require.Equal(t, newRootExpr(newPipeline(newSpansetFilter(tc.expected))), actual)
 		})
 	}
 }
@@ -859,7 +866,7 @@ func TestSpansetFilterOperators(t *testing.T) {
 	test := func(q string, expected FieldExpression) {
 		actual, err := Parse(q)
 		require.NoError(t, err, q)
-		require.Equal(t, &RootExpr{newPipeline(newSpansetFilter(expected))}, actual, q)
+		require.Equal(t, newRootExpr(newPipeline(newSpansetFilter(expected))), actual, q)
 	}
 
 	for _, tc := range tests {
@@ -940,25 +947,25 @@ func TestAttributes(t *testing.T) {
 			actual, err := Parse(s)
 
 			require.NoError(t, err)
-			require.Equal(t, &RootExpr{newPipeline(newSpansetFilter(tc.expected))}, actual)
+			require.Equal(t, newRootExpr(newPipeline(newSpansetFilter(tc.expected))), actual)
 
 			s = "{" + tc.in + "}"
 			actual, err = Parse(s)
 
 			require.NoError(t, err)
-			require.Equal(t, &RootExpr{newPipeline(newSpansetFilter(tc.expected))}, actual)
+			require.Equal(t, newRootExpr(newPipeline(newSpansetFilter(tc.expected))), actual)
 
 			s = "{ (" + tc.in + ") }"
 			actual, err = Parse(s)
 
 			require.NoError(t, err)
-			require.Equal(t, &RootExpr{newPipeline(newSpansetFilter(tc.expected))}, actual)
+			require.Equal(t, newRootExpr(newPipeline(newSpansetFilter(tc.expected))), actual)
 
 			s = "{ " + tc.in + " + " + tc.in + " }"
 			actual, err = Parse(s)
 
 			require.NoError(t, err)
-			require.Equal(t, &RootExpr{newPipeline(newSpansetFilter(newBinaryOperation(OpAdd, tc.expected, tc.expected)))}, actual)
+			require.Equal(t, newRootExpr(newPipeline(newSpansetFilter(newBinaryOperation(OpAdd, tc.expected, tc.expected)))), actual)
 		})
 	}
 }
@@ -987,65 +994,65 @@ func TestIntrinsics(t *testing.T) {
 			actual, err := Parse(s)
 
 			require.NoError(t, err)
-			require.Equal(t, &RootExpr{newPipeline(
+			require.Equal(t, newRootExpr(newPipeline(
 				newSpansetFilter(Attribute{
 					Scope:     AttributeScopeNone,
 					Parent:    false,
 					Name:      tc.in,
 					Intrinsic: tc.expected,
-				}))}, actual)
+				}))), actual)
 
 			// as attribute e.g .duration
 			s = "{ ." + tc.in + "}"
 			actual, err = Parse(s)
 
 			require.NoError(t, err)
-			require.Equal(t, &RootExpr{newPipeline(
+			require.Equal(t, newRootExpr(newPipeline(
 				newSpansetFilter(Attribute{
 					Scope:     AttributeScopeNone,
 					Parent:    false,
 					Name:      tc.in,
 					Intrinsic: IntrinsicNone,
-				}))}, actual)
+				}))), actual)
 
 			// as span scoped attribute e.g span.duration
 			s = "{ span." + tc.in + "}"
 			actual, err = Parse(s)
 
 			require.NoError(t, err)
-			require.Equal(t, &RootExpr{newPipeline(
+			require.Equal(t, newRootExpr(newPipeline(
 				newSpansetFilter(Attribute{
 					Scope:     AttributeScopeSpan,
 					Parent:    false,
 					Name:      tc.in,
 					Intrinsic: IntrinsicNone,
-				}))}, actual)
+				}))), actual)
 
 			// as resource scoped attribute e.g resource.duration
 			s = "{ resource." + tc.in + "}"
 			actual, err = Parse(s)
 
 			require.NoError(t, err)
-			require.Equal(t, &RootExpr{newPipeline(
+			require.Equal(t, newRootExpr(newPipeline(
 				newSpansetFilter(Attribute{
 					Scope:     AttributeScopeResource,
 					Parent:    false,
 					Name:      tc.in,
 					Intrinsic: IntrinsicNone,
-				}))}, actual)
+				}))), actual)
 
 			// as parent scoped intrinsic e.g parent.duration
 			s = "{ parent." + tc.in + "}"
 			actual, err = Parse(s)
 
 			require.NoError(t, err)
-			require.Equal(t, &RootExpr{newPipeline(
+			require.Equal(t, newRootExpr(newPipeline(
 				newSpansetFilter(Attribute{
 					Scope:     AttributeScopeNone,
 					Parent:    true,
 					Name:      tc.in,
 					Intrinsic: tc.expected,
-				}))}, actual)
+				}))), actual)
 
 			// as nested parent scoped intrinsic e.g. parent.duration.foo
 			// this becomes lookup on attribute named "duration.foo"
@@ -1053,39 +1060,39 @@ func TestIntrinsics(t *testing.T) {
 			actual, err = Parse(s)
 
 			require.NoError(t, err)
-			require.Equal(t, &RootExpr{newPipeline(
+			require.Equal(t, newRootExpr(newPipeline(
 				newSpansetFilter(Attribute{
 					Scope:     AttributeScopeNone,
 					Parent:    true,
 					Name:      tc.in + ".foo",
 					Intrinsic: IntrinsicNone,
-				}))}, actual)
+				}))), actual)
 
 			// as parent resource scoped attribute e.g. parent.resource.duration
 			s = "{ parent.resource." + tc.in + "}"
 			actual, err = Parse(s)
 
 			require.NoError(t, err)
-			require.Equal(t, &RootExpr{newPipeline(
+			require.Equal(t, newRootExpr(newPipeline(
 				newSpansetFilter(Attribute{
 					Scope:     AttributeScopeResource,
 					Parent:    true,
 					Name:      tc.in,
 					Intrinsic: IntrinsicNone,
-				}))}, actual)
+				}))), actual)
 
 			// as parent span scoped attribute e.g. praent.span.duration
 			s = "{ parent.span." + tc.in + "}"
 			actual, err = Parse(s)
 
 			require.NoError(t, err)
-			require.Equal(t, &RootExpr{newPipeline(
+			require.Equal(t, newRootExpr(newPipeline(
 				newSpansetFilter(Attribute{
 					Scope:     AttributeScopeSpan,
 					Parent:    true,
 					Name:      tc.in,
 					Intrinsic: IntrinsicNone,
-				}))}, actual)
+				}))), actual)
 		})
 	}
 }
@@ -1123,7 +1130,7 @@ func TestEmptyQuery(t *testing.T) {
 		t.Run(tc.in, func(t *testing.T) {
 			actual, err := Parse(tc.in)
 			require.NoError(t, err, tc.in)
-			require.Equal(t, &RootExpr{newPipeline(newSpansetFilter(NewStaticBool(true)))}, actual, tc.in)
+			require.Equal(t, newRootExpr(newPipeline(newSpansetFilter(NewStaticBool(true)))), actual, tc.in)
 		})
 	}
 }
