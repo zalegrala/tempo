@@ -15,7 +15,7 @@ type metricsFirstStageElement interface {
 	Element
 	extractConditions(request *FetchSpansRequest)
 	init(MetricsQueryRangeRequest)
-	observe(Span)
+	observe(Span) // TODO - batching?
 	result() SeriesSet
 }
 

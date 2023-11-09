@@ -39,6 +39,7 @@ type VectorAggregator interface {
 	Sample() float64
 }
 
+// TODO - Rewrite me to be []float64 which is more efficient
 type CountOverTimeAggregator struct {
 	count    float64
 	rateMult float64
@@ -208,6 +209,7 @@ func (u *UngroupedAggregator) Series() SeriesSet {
 	}
 }
 
+// TODO - Rewrite me to support batching across multiple fetchers.  Needs separate compile and evalulate steps
 func (e *Engine) MetricsQueryRange(ctx context.Context, req MetricsQueryRangeRequest, fetcher SpansetFetcher) (results SeriesSet, err error) {
 	if req.Start <= 0 {
 		return SeriesSet{}, fmt.Errorf("start required")

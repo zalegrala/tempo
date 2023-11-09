@@ -109,6 +109,7 @@ root:
 metricsAggregation:
       RATE            OPEN_PARENS CLOSE_PARENS { $$ = newMetricsAggregate(metricsAggregateRate, nil) }
     | COUNT_OVER_TIME OPEN_PARENS CLOSE_PARENS { $$ = newMetricsAggregate(metricsAggregateCountOverTime, nil) }
+    | RATE            OPEN_PARENS CLOSE_PARENS BY OPEN_PARENS attributeArgs CLOSE_PARENS { $$ = newMetricsAggregate(metricsAggregateRate, $6) }
     | COUNT_OVER_TIME OPEN_PARENS CLOSE_PARENS BY OPEN_PARENS attributeArgs CLOSE_PARENS { $$ = newMetricsAggregate(metricsAggregateCountOverTime, $6) }
   ;
 
