@@ -29,16 +29,30 @@ type TimeSeries struct {
 	Values []float64
 }
 
-// TODO - Move me to tempopb proto
-type SeriesSet struct {
-	Series []TimeSeries
-}
+// TODO - Make an analog of me in tempopb proto for over-the-wire transmission
+type SeriesSet map[LabelSet]TimeSeries
 
+// VectorAggregator turns a vector of spans into a single numeric scalar
 type VectorAggregator interface {
 	Observe(s Span)
 	Sample() float64
 }
 
+// RangeAggregator sorts spans into time slots
+// TODO - for efficiency we probably combine this with VectorAggregator (see todo about CountOverTimeAggregator)
+type RangeAggregator interface {
+	Observe(s Span)
+	Samples() []float64
+}
+
+// SpanAggregator sorts spans into series
+type SpanAggregator interface {
+	Observe(Span)
+	Series() SeriesSet
+}
+
+// CountOverTimeAggregator counts the number of spans. It can also
+// calculate the rate when given a multiplier.
 // TODO - Rewrite me to be []float64 which is more efficient
 type CountOverTimeAggregator struct {
 	count    float64
@@ -67,11 +81,7 @@ func (c *CountOverTimeAggregator) Sample() float64 {
 	return c.count * c.rateMult
 }
 
-type RangeAggregator interface {
-	Observe(s Span)
-	Samples() []float64
-}
-
+// StepAggregator sorts spans into time slots using a step interval like 30s or 1m
 type StepAggregator struct {
 	start   uint64
 	end     uint64
@@ -112,11 +122,6 @@ func (s *StepAggregator) Samples() []float64 {
 		ss[i] = v.Sample()
 	}
 	return ss
-}
-
-type SpanAggregator interface {
-	Observe(Span)
-	Series() SeriesSet
 }
 
 type GroupingAggregator struct {
@@ -174,19 +179,16 @@ func (g *GroupingAggregator) Observe(span Span) {
 }
 
 func (g *GroupingAggregator) Series() SeriesSet {
-	ss := make([]TimeSeries, 0, len(g.series))
+	ss := SeriesSet{}
 
 	for k, v := range g.series {
-		ts := TimeSeries{
+		ss[k] = TimeSeries{
 			Labels: k,
 			Values: v.Samples(),
 		}
-		ss = append(ss, ts)
 	}
 
-	return SeriesSet{
-		Series: ss,
-	}
+	return ss
 }
 
 // UngroupedAggregator builds a single series with no labels. e.g. {} | rate()
@@ -201,38 +203,53 @@ func (u *UngroupedAggregator) Observe(span Span) {
 }
 
 func (u *UngroupedAggregator) Series() SeriesSet {
+	l := LabelSet{}
 	return SeriesSet{
-		Series: []TimeSeries{{
-			Labels: LabelSet{},
+		l: {
+			Labels: l,
 			Values: u.innerAgg.Samples(),
-		}},
+		},
 	}
 }
 
-// TODO - Rewrite me to support batching across multiple fetchers.  Needs separate compile and evalulate steps
-func (e *Engine) MetricsQueryRange(ctx context.Context, req MetricsQueryRangeRequest, fetcher SpansetFetcher) (results SeriesSet, err error) {
+// ExecuteMetricsQueryRange - Execute the given metrics query
+func (e *Engine) ExecuteMetricsQueryRange(ctx context.Context, req MetricsQueryRangeRequest, fetcher SpansetFetcher) (results SeriesSet, err error) {
+	eval, err := e.CompileMetricsQueryRange(req)
+	if err != nil {
+		return nil, err
+	}
+
+	err = eval.Do(ctx, fetcher)
+	if err != nil {
+		return nil, err
+	}
+
+	return eval.Results()
+}
+
+func (e *Engine) CompileMetricsQueryRange(req MetricsQueryRangeRequest) (*MetricsEvalulator, error) {
 	if req.Start <= 0 {
-		return SeriesSet{}, fmt.Errorf("start required")
+		return nil, fmt.Errorf("start required")
 	}
 	if req.End <= 0 {
-		return SeriesSet{}, fmt.Errorf("end required")
+		return nil, fmt.Errorf("end required")
 	}
 	if req.End <= req.Start {
-		return SeriesSet{}, fmt.Errorf("end must be greater than start")
+		return nil, fmt.Errorf("end must be greater than start")
 	}
 	if req.Step <= 0 {
-		return SeriesSet{}, fmt.Errorf("step required")
+		return nil, fmt.Errorf("step required")
 	}
 
 	// TODO - This needs to validate the non-metrics pipeline too
 	eval, metricsPipeline, storageReq, err := e.Compile(req.Q)
 	if err != nil {
-		return SeriesSet{}, fmt.Errorf("compiling query: %w", err)
+		return nil, fmt.Errorf("compiling query: %w", err)
 	}
 
 	err = metricsPipeline.validate()
 	if err != nil {
-		return SeriesSet{}, err
+		return nil, err
 	}
 
 	var (
@@ -253,38 +270,13 @@ func (e *Engine) MetricsQueryRange(ctx context.Context, req MetricsQueryRangeReq
 		}
 	}
 
-	fetch, err := fetcher.Fetch(ctx, *storageReq)
-	if errors.Is(err, util.ErrUnsupported) {
-		return SeriesSet{}, nil
-	}
-	if err != nil {
-		return SeriesSet{}, err
-	}
-
-	defer fetch.Results.Close()
-
 	// This initializes all step buffers, counters, etc
 	metricsPipeline.init(req)
 
-	for {
-		ss, err := fetch.Results.Next(ctx)
-		if err != nil {
-			return SeriesSet{}, err
-		}
-		if ss == nil {
-			break
-		}
-
-		for _, s := range ss.Spans {
-			metricsPipeline.observe(s)
-		}
-
-		ss.Release()
-	}
-
-	// fmt.Println("Bytes read:", humanize.Bytes(fetch.Bytes()))
-
-	return metricsPipeline.result(), nil
+	return &MetricsEvalulator{
+		storageReq:      *storageReq,
+		metricsPipeline: metricsPipeline,
+	}, nil
 }
 
 func lookup(needles []Attribute, haystack map[Attribute]Static) Static {
@@ -295,4 +287,42 @@ func lookup(needles []Attribute, haystack map[Attribute]Static) Static {
 	}
 
 	return Static{}
+}
+
+type MetricsEvalulator struct {
+	storageReq      FetchSpansRequest
+	metricsPipeline metricsFirstStageElement
+}
+
+func (e *MetricsEvalulator) Do(ctx context.Context, f SpansetFetcher) error {
+	fetch, err := f.Fetch(ctx, e.storageReq)
+	if errors.Is(err, util.ErrUnsupported) {
+		return nil
+	}
+	if err != nil {
+		return nil
+	}
+
+	defer fetch.Results.Close()
+
+	for {
+		ss, err := fetch.Results.Next(ctx)
+		if err != nil {
+			return nil
+		}
+		if ss == nil {
+			break
+		}
+
+		for _, s := range ss.Spans {
+			e.metricsPipeline.observe(s)
+		}
+
+		ss.Release()
+	}
+	return nil
+}
+
+func (e *MetricsEvalulator) Results() (SeriesSet, error) {
+	return e.metricsPipeline.result(), nil
 }
