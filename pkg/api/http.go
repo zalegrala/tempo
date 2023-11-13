@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -54,6 +55,7 @@ const (
 
 	// generator summary
 	urlParamGroupBy = "groupBy"
+	urlParamMetric  = "metric"
 
 	HeaderAccept         = "Accept"
 	HeaderContentType    = "Content-Type"
@@ -73,6 +75,7 @@ const (
 	PathUsageStats         = "/status/usage-stats"
 	PathSpanMetrics        = "/api/metrics"
 	PathSpanMetricsSummary = "/api/metrics/summary"
+	PathSpanMetricsSelect  = "/api/metrics/select"
 
 	// PathOverrides user configurable overrides
 	PathOverrides = "/api/overrides"
@@ -420,6 +423,65 @@ func ParseSpanMetricsSummaryRequest(r *http.Request) (*tempopb.SpanMetricsSummar
 			return nil, fmt.Errorf("invalid end: %w", err)
 		}
 		req.End = uint32(end)
+	}
+
+	return req, nil
+}
+
+func ParseSpanMetricsSelectRequest(r *http.Request) (*tempopb.SpanMetricsSelectRequest, error) {
+	req := &tempopb.SpanMetricsSelectRequest{}
+
+	query := r.URL.Query().Get(urlParamQuery)
+	req.Query = query
+
+	// Prometheus params
+	if q2 := r.URL.Query().Get("query"); q2 != "" {
+		req.Query = q2
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > 0 {
+		v, err := url.ParseQuery(string(body))
+		if err != nil {
+			return nil, err
+		}
+		if q2 := v.Get("query"); q2 != "" {
+			req.Query = q2
+		}
+	}
+	// fmt.Println(string(body))
+
+	if s, ok := extractQueryParam(r, urlParamStart); ok {
+		start, err := strconv.ParseInt(s, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("invalid start: %w", err)
+		}
+		req.Start = uint32(start)
+	}
+
+	if s, ok := extractQueryParam(r, urlParamEnd); ok {
+		end, err := strconv.ParseInt(s, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("invalid end: %w", err)
+		}
+		req.End = uint32(end)
+	}
+
+	metric := r.URL.Query().Get(urlParamMetric)
+	switch {
+	case metric == "p99":
+		req.Metric = tempopb.SpanMetricsSelectRequest_P99
+	case metric == "p90":
+		req.Metric = tempopb.SpanMetricsSelectRequest_P90
+	case metric == "p50":
+		req.Metric = tempopb.SpanMetricsSelectRequest_P50
+	case metric == "errorrate":
+		req.Metric = tempopb.SpanMetricsSelectRequest_ERRORRATE
+	default:
+		req.Metric = tempopb.SpanMetricsSelectRequest_P90
+		// return nil, fmt.Errorf("invalid metric: %s", metric)
 	}
 
 	return req, nil
