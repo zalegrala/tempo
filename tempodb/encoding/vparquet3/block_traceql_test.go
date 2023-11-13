@@ -622,14 +622,18 @@ func BenchmarkBackendBlockMetricsQueryRange(b *testing.B) {
 		query string
 		step  time.Duration
 	}{
-		{"{resource.service.name=`tempo-gateway`} | count_over_time() by (resource.cluster)", 30 * time.Second},
-		{"{} | rate()", time.Second},
-		{"{} | count_over_time()", time.Second},
+		//{"{resource.service.name=`tempo-gateway`} | count_over_time()", time.Minute},
+		//{"{resource.service.name=`tempo-gateway`} | rate() by (resource.service.name)", 60 * time.Second},
+		{"{} | rate()", time.Minute},
+		//{"{} | count_over_time()", time.Second},
 	}
 
-	ctx := context.TODO()
-	tenantID := "1"
-	blockID := uuid.MustParse("06ebd383-8d4e-4289-b0e9-cf2197d611d5")
+	var (
+		ctx      = context.TODO()
+		tenantID = "1"
+		blockID  = uuid.MustParse("06ebd383-8d4e-4289-b0e9-cf2197d611d5")
+		e        = traceql.NewEngine()
+	)
 
 	r, _, _, err := local.New(&local.Config{
 		Path: path.Join("/Users/marty/src/tmp/"),
@@ -649,38 +653,91 @@ func BenchmarkBackendBlockMetricsQueryRange(b *testing.B) {
 
 	for _, tc := range testCases {
 		b.Run(tc.query+"/"+tc.step.String(), func(b *testing.B) {
+			req := traceql.MetricsQueryRangeRequest{
+				Start: uint64(meta.StartTime.UnixNano()),
+				End:   uint64(meta.EndTime.UnixNano()),
+				Step:  uint64(tc.step),
+				Q:     tc.query,
+				Shard: 3,
+				Of:    0,
+			}
+
+			eval, err := e.CompileMetricsQueryRange(req)
+			require.NoError(b, err)
+
+			var resp traceql.FetchSpansResponse
+			f := traceql.NewSpansetFetcherWrapper(func(ctx context.Context, req traceql.FetchSpansRequest) (traceql.FetchSpansResponse, error) {
+				var err error
+				resp, err = block.Fetch(ctx, req, opts)
+				return resp, err
+			})
+
+			b.ResetTimer()
+
 			for i := 0; i < b.N; i++ {
-
-				var resp traceql.FetchSpansResponse
-				f := traceql.NewSpansetFetcherWrapper(func(ctx context.Context, req traceql.FetchSpansRequest) (traceql.FetchSpansResponse, error) {
-					var err error
-					resp, err = block.Fetch(ctx, req, opts)
-					return resp, err
-				})
-
-				e := traceql.NewEngine()
-
-				req := traceql.MetricsQueryRangeRequest{
-					Start: uint64(meta.StartTime.UnixNano()),
-					End:   uint64(meta.EndTime.UnixNano()),
-					Step:  uint64(tc.step),
-					Q:     tc.query,
-				}
-
-				r, err := e.MetricsQueryRange(ctx, req, f)
-
+				err := eval.Do(ctx, f)
 				require.NoError(b, err)
-				require.NotNil(b, r)
+			}
 
-				if b.N == 1 {
-					for _, s := range r.Series {
-						fmt.Println(s.Labels)
-						fmt.Println(s.Values)
-					}
+			if b.N == 1 {
+				r, err := eval.Results()
+				require.NoError(b, err)
+				for _, s := range r {
+					fmt.Println(s.Labels)
+					fmt.Println(s.Values)
 				}
-
 				// fmt.Println("Bytes read:", humanize.Bytes(resp.Bytes()))
 			}
 		})
+	}
+}
+
+func TestStuff(t *testing.T) {
+	NewTraceIDShardingPredicate(1, 5)
+}
+
+func TestCrap(b *testing.T) {
+	var (
+		ctx      = context.TODO()
+		tenantID = "1"
+		blockID  = uuid.MustParse("06ebd383-8d4e-4289-b0e9-cf2197d611d5")
+		e        = traceql.NewEngine()
+	)
+
+	r, _, _, err := local.New(&local.Config{
+		Path: path.Join("/Users/marty/src/tmp/"),
+	})
+	require.NoError(b, err)
+
+	rr := backend.NewReader(r)
+	meta, err := rr.BlockMeta(ctx, blockID, tenantID)
+	require.NoError(b, err)
+	require.Equal(b, VersionString, meta.Version)
+
+	opts := common.DefaultSearchOptions()
+
+	block := newBackendBlock(meta, rr)
+	_, _, err = block.openForSearch(ctx, opts)
+	require.NoError(b, err)
+
+	req := traceql.MetricsQueryRangeRequest{
+		Start: uint64(meta.StartTime.UnixNano()),
+		End:   uint64(meta.EndTime.UnixNano()),
+		Step:  uint64(time.Hour),
+		Q:     "{} | count_over_time()",
+		Of:    255,
+	}
+
+	f := traceql.NewSpansetFetcherWrapper(func(ctx context.Context, req traceql.FetchSpansRequest) (traceql.FetchSpansResponse, error) {
+		return block.Fetch(ctx, req, opts)
+	})
+
+	for i := 1; i <= req.Of; i++ {
+		req.Shard = i
+		res, err := e.ExecuteMetricsQueryRange(ctx, req, f)
+		require.NoError(b, err)
+
+		// 11,265,136
+		fmt.Println(i, res[traceql.LabelSet{}])
 	}
 }

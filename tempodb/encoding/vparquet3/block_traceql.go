@@ -1,6 +1,7 @@
 package vparquet3
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/parquet-go/parquet-go"
 
+	"github.com/grafana/tempo/pkg/blockboundary"
 	"github.com/grafana/tempo/pkg/parquetquery"
 	v1 "github.com/grafana/tempo/pkg/tempopb/trace/v1"
 	"github.com/grafana/tempo/pkg/traceql"
@@ -847,7 +849,7 @@ func (i *mergeSpansetIterator) Close() {
 //                                                            V
 
 func fetch(ctx context.Context, req traceql.FetchSpansRequest, pf *parquet.File, opts common.SearchOptions, dc backend.DedicatedColumns) (*spansetIterator, error) {
-	iter, err := createAllIterator(ctx, nil, req.Conditions, req.AllConditions, req.StartTimeUnixNanos, req.EndTimeUnixNanos, pf, opts, dc)
+	iter, err := createAllIterator(ctx, nil, req.Conditions, req.AllConditions, req.StartTimeUnixNanos, req.EndTimeUnixNanos, req.Shard, req.Of, pf, opts, dc)
 	if err != nil {
 		return nil, fmt.Errorf("error creating iterator: %w", err)
 	}
@@ -855,7 +857,7 @@ func fetch(ctx context.Context, req traceql.FetchSpansRequest, pf *parquet.File,
 	if req.SecondPass != nil {
 		iter = newBridgeIterator(newRebatchIterator(iter), req.SecondPass)
 
-		iter, err = createAllIterator(ctx, iter, req.SecondPassConditions, false, 0, 0, pf, opts, dc)
+		iter, err = createAllIterator(ctx, iter, req.SecondPassConditions, false, 0, 0, req.Shard, req.Of, pf, opts, dc)
 		if err != nil {
 			return nil, fmt.Errorf("error creating second pass iterator: %w", err)
 		}
@@ -864,7 +866,7 @@ func fetch(ctx context.Context, req traceql.FetchSpansRequest, pf *parquet.File,
 	return newSpansetIterator(newRebatchIterator(iter)), nil
 }
 
-func createAllIterator(ctx context.Context, primaryIter parquetquery.Iterator, conds []traceql.Condition, allConditions bool, start, end uint64, pf *parquet.File, opts common.SearchOptions, dc backend.DedicatedColumns) (parquetquery.Iterator, error) {
+func createAllIterator(ctx context.Context, primaryIter parquetquery.Iterator, conds []traceql.Condition, allConditions bool, start, end uint64, shard, of int, pf *parquet.File, opts common.SearchOptions, dc backend.DedicatedColumns) (parquetquery.Iterator, error) {
 	// Categorize conditions into span-level or resource-level
 	var (
 		mingledConditions  bool
@@ -947,7 +949,7 @@ func createAllIterator(ctx context.Context, primaryIter parquetquery.Iterator, c
 		return nil, fmt.Errorf("creating resource iterator: %w", err)
 	}
 
-	return createTraceIterator(makeIter, resourceIter, traceConditions, start, end, allConditions)
+	return createTraceIterator(makeIter, resourceIter, traceConditions, start, end, shard, of, allConditions)
 }
 
 // createSpanIterator iterates through all span-level columns, groups them into rows representing
@@ -1283,7 +1285,7 @@ func createResourceIterator(makeIter makeIterFn, spanIterator parquetquery.Itera
 		required, iters, batchCol), nil
 }
 
-func createTraceIterator(makeIter makeIterFn, resourceIter parquetquery.Iterator, conds []traceql.Condition, start, end uint64, allConditions bool) (parquetquery.Iterator, error) {
+func createTraceIterator(makeIter makeIterFn, resourceIter parquetquery.Iterator, conds []traceql.Condition, start, end uint64, shard, of int, allConditions bool) (parquetquery.Iterator, error) {
 	traceIters := make([]parquetquery.Iterator, 0, 3)
 
 	var err error
@@ -1294,7 +1296,7 @@ func createTraceIterator(makeIter makeIterFn, resourceIter parquetquery.Iterator
 	for _, cond := range conds {
 		switch cond.Attribute.Intrinsic {
 		case traceql.IntrinsicTraceID:
-			traceIters = append(traceIters, makeIter(columnPathTraceID, nil, columnPathTraceID))
+			traceIters = append(traceIters, makeIter(columnPathTraceID, NewTraceIDShardingPredicate(shard, of), columnPathTraceID))
 		case traceql.IntrinsicTraceDuration:
 			var pred parquetquery.Predicate
 			if allConditions {
@@ -2047,4 +2049,76 @@ func unsafeToString(b []byte) string {
 		return ""
 	}
 	return unsafe.String(unsafe.SliceData(b), len(b))
+}
+
+/*type TraceIDShardingPredicate struct {
+}
+
+var _ parquetquery.Predicate = (*TraceIDShardingPredicate)(nil)*/
+
+func NewTraceIDShardingPredicate(shard, of int) parquetquery.Predicate {
+	if of <= 1 || shard <= 0 {
+		return nil
+	}
+
+	// We reuse this method to divide the trace ID space up into
+	// shards. The output is 16-bytes but only the upper 8 are used.
+	allBounds := blockboundary.CreateBlockBoundaries(of)
+
+	pairs := []struct {
+		min, max []byte
+	}{}
+
+	// First pair is 8-byte IDs left-padded with zeroes to make 16-byte divisions
+	// that matches the 16-byte layout in the block.
+	// We reuse the upper 8-bytes of the boundaries.
+	pairs = append(pairs, struct {
+		min []byte
+		max []byte
+	}{
+		min: append([]byte{0, 0, 0, 0, 0, 0, 0, 0}, allBounds[shard-1][0:8]...),
+		max: append([]byte{0, 0, 0, 0, 0, 0, 0, 0}, allBounds[shard][0:8]...),
+	})
+
+	// Second pair is normal full precision 16-byte IDs.
+	// However there is one caveat - We adjust the very first boundary to ensure it doesn't
+	// overlap with the 8-byte precision ones. I.e. the minimum 16-byte ID 0x0000.... would
+	// unintentionally include all 8-byte IDs.
+	// The first 16-byte ID starts here:
+	allBounds[0] = []byte{0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0}
+	pairs = append(pairs, struct {
+		min []byte
+		max []byte
+	}{
+		min: allBounds[shard-1],
+		max: allBounds[shard],
+	})
+
+	// Top most 0xFFFFF... boundary is inclusive
+	upperInclusive := -1
+	if shard == of {
+		upperInclusive = 0
+	}
+
+	isMatch := func(id []byte) bool {
+		for _, p := range pairs {
+			if bytes.Compare(p.min, id) <= 0 && bytes.Compare(id, p.max) <= upperInclusive {
+				return true
+			}
+		}
+		return false
+	}
+
+	withinRange := func(min []byte, max []byte) bool {
+		for _, p := range pairs {
+			if bytes.Compare(p.min, max) <= 0 && bytes.Compare(min, p.max) <= upperInclusive {
+				return true
+			}
+		}
+		return false
+	}
+
+	return parquetquery.NewGenericPredicate(isMatch, withinRange, func(v parquet.Value) []byte {
+		return v.ByteArray()
+	})
 }

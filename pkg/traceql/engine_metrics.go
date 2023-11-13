@@ -15,6 +15,7 @@ type MetricsQueryRangeRequest struct {
 	Q          string
 	Start, End uint64 // Time window in unix nanoseconds. Start inclusive, end exclusive
 	Step       uint64 // Step duration in nanoseconds (30s, 1m, 1h)
+	Shard, Of  int
 }
 
 type Label struct {
@@ -258,8 +259,11 @@ func (e *Engine) CompileMetricsQueryRange(req MetricsQueryRangeRequest) (*Metric
 		endValue   = NewStaticInt(int(req.End))
 	)
 
+	storageReq.Shard = req.Shard
+	storageReq.Of = req.Of
 	storageReq.StartTimeUnixNanos = req.Start
 	storageReq.EndTimeUnixNanos = req.End
+	storageReq.Conditions = append(storageReq.Conditions, Condition{Attribute: NewIntrinsic(IntrinsicTraceID)})
 	storageReq.Conditions = append(storageReq.Conditions, Condition{Attribute: startTime, Op: OpGreaterEqual, Operands: []Static{startValue}}) // move this to ast extractConditions?
 	storageReq.Conditions = append(storageReq.Conditions, Condition{Attribute: startTime, Op: OpLess, Operands: []Static{endValue}})
 
@@ -303,6 +307,8 @@ func (e *MetricsEvalulator) Do(ctx context.Context, f SpansetFetcher) error {
 		return nil
 	}
 
+	traceIDLengthCounts := make([]int, 17)
+
 	defer fetch.Results.Close()
 
 	for {
@@ -314,12 +320,22 @@ func (e *MetricsEvalulator) Do(ctx context.Context, f SpansetFetcher) error {
 			break
 		}
 
+		traceID := ss.TraceID
+		for i := 0; i < 16; i++ {
+			if traceID[i] > 0 {
+				traceIDLengthCounts[16-i]++
+				break
+			}
+		}
+
 		for _, s := range ss.Spans {
 			e.metricsPipeline.observe(s)
 		}
 
 		ss.Release()
 	}
+
+	//fmt.Println(traceIDLengthCounts)
 	return nil
 }
 

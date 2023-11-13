@@ -54,6 +54,9 @@ type FetchSpansRequest struct {
 	EndTimeUnixNanos   uint64
 	Conditions         []Condition
 
+	Shard int
+	Of    int
+
 	// Hints
 
 	// By default the storage layer fetches spans meeting any of the criteria.
