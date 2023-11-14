@@ -310,7 +310,9 @@ message QueryRangeRequest {
   string query = 1;
   uint64 start = 2;
   uint64 end = 3;
-  uint32 step = 4;
+  uint64 step = 4;
+  uint32 shard = 5;
+  uint32 of = 6;
 }
 
 message QueryRangeResponse {
