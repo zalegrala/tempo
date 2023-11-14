@@ -653,11 +653,11 @@ func BenchmarkBackendBlockMetricsQueryRange(b *testing.B) {
 
 	for _, tc := range testCases {
 		b.Run(tc.query+"/"+tc.step.String(), func(b *testing.B) {
-			req := traceql.MetricsQueryRangeRequest{
+			req := &tempopb.QueryRangeRequest{
 				Start: uint64(meta.StartTime.UnixNano()),
 				End:   uint64(meta.EndTime.UnixNano()),
 				Step:  uint64(tc.step),
-				Q:     tc.query,
+				Query: tc.query,
 				Shard: 3,
 				Of:    0,
 			}
@@ -720,11 +720,11 @@ func TestCrap(b *testing.T) {
 	_, _, err = block.openForSearch(ctx, opts)
 	require.NoError(b, err)
 
-	req := traceql.MetricsQueryRangeRequest{
+	req := &tempopb.QueryRangeRequest{
 		Start: uint64(meta.StartTime.UnixNano()),
 		End:   uint64(meta.EndTime.UnixNano()),
 		Step:  uint64(time.Hour),
-		Q:     "{} | count_over_time()",
+		Query: "{} | count_over_time()",
 		Of:    255,
 	}
 
@@ -732,7 +732,7 @@ func TestCrap(b *testing.T) {
 		return block.Fetch(ctx, req, opts)
 	})
 
-	for i := 1; i <= req.Of; i++ {
+	for i := uint32(1); i <= req.Of; i++ {
 		req.Shard = i
 		res, err := e.ExecuteMetricsQueryRange(ctx, req, f)
 		require.NoError(b, err)
