@@ -150,12 +150,12 @@ func (o CoalesceOperation) extractConditions(*FetchSpansRequest) {
 }
 
 type SelectOperation struct {
-	exprs []FieldExpression
+	attrs []Attribute
 }
 
-func newSelectOperation(exprs []FieldExpression) SelectOperation {
+func newSelectOperation(exprs []Attribute) SelectOperation {
 	return SelectOperation{
-		exprs: exprs,
+		attrs: exprs,
 	}
 }
 

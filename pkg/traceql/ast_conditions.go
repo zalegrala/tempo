@@ -24,7 +24,7 @@ func (f SpansetFilter) extractConditions(request *FetchSpansRequest) {
 // extractConditions on Select puts its conditions into the SecondPassConditions
 func (o SelectOperation) extractConditions(request *FetchSpansRequest) {
 	selectR := &FetchSpansRequest{}
-	for _, expr := range o.exprs {
+	for _, expr := range o.attrs {
 		expr.extractConditions(selectR)
 	}
 	// copy any conditions to the normal request's SecondPassConditions

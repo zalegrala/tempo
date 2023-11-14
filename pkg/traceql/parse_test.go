@@ -1,7 +1,6 @@
 package traceql
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -10,9 +9,28 @@ import (
 )
 
 func TestEscapes(t *testing.T) {
-	e, err := Parse(`{ ."\"foo\""="\"\tbar\""}`)
-	require.NoError(t, err)
-	fmt.Println(e)
+	tests := []struct {
+		in       string
+		expected Pipeline
+	}{
+		{
+			in: `{ ."\"foo\""="\"\tbar\""}`,
+			expected: newPipeline(
+				newSpansetFilter(
+					newBinaryOperation(OpEqual,
+						NewAttribute("\"foo\""),
+						NewStaticString("\"\tbar\"")))),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			actual, err := Parse(tc.in)
+
+			require.NoError(t, err)
+			require.Equal(t, newRootExpr(tc.expected), actual)
+		})
+	}
 }
 
 func TestPipelineErrors(t *testing.T) {
@@ -452,8 +470,8 @@ func TestSelectOperation(t *testing.T) {
 		in       string
 		expected Pipeline
 	}{
-		{in: "select(.a)", expected: newPipeline(newSelectOperation([]FieldExpression{NewAttribute("a")}))},
-		{in: "select(.a,.b)", expected: newPipeline(newSelectOperation([]FieldExpression{NewAttribute("a"), NewAttribute("b")}))},
+		{in: "select(.a)", expected: newPipeline(newSelectOperation([]Attribute{NewAttribute("a")}))},
+		{in: "select(.a,.b)", expected: newPipeline(newSelectOperation([]Attribute{NewAttribute("a"), NewAttribute("b")}))},
 	}
 
 	for _, tc := range tests {

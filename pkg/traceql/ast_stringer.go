@@ -27,8 +27,8 @@ func (o CoalesceOperation) String() string {
 }
 
 func (o SelectOperation) String() string {
-	s := make([]string, 0, len(o.exprs))
-	for _, e := range o.exprs {
+	s := make([]string, 0, len(o.attrs))
+	for _, e := range o.attrs {
 		s = append(s, e.String())
 	}
 	return "select(" + strings.Join(s, ", ") + ")"

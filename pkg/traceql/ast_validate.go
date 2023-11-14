@@ -43,7 +43,7 @@ func (o CoalesceOperation) validate() error {
 }
 
 func (o SelectOperation) validate() error {
-	for _, e := range o.exprs {
+	for _, e := range o.attrs {
 		if err := e.validate(); err != nil {
 			return err
 		}
