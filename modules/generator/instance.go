@@ -21,7 +21,9 @@ import (
 	"github.com/grafana/tempo/modules/generator/registry"
 	"github.com/grafana/tempo/modules/generator/storage"
 	"github.com/grafana/tempo/pkg/tempopb"
+	commonv1proto "github.com/grafana/tempo/pkg/tempopb/common/v1"
 	v1 "github.com/grafana/tempo/pkg/tempopb/trace/v1"
+	"github.com/grafana/tempo/pkg/traceql"
 	"github.com/grafana/tempo/tempodb/wal"
 
 	"go.uber.org/atomic"
@@ -394,6 +396,57 @@ func (i *instance) GetMetrics(ctx context.Context, req *tempopb.SpanMetricsReque
 	}
 
 	return nil, fmt.Errorf("localblocks processor not found")
+}
+
+func (i *instance) QueryRange(ctx context.Context, req *tempopb.QueryRangeRequest) (resp *tempopb.QueryRangeResponse, err error) {
+	for _, processor := range i.processors {
+		switch p := processor.(type) {
+		case *localblocks.Processor:
+			r, err := p.QueryRange(ctx, req)
+			if err != nil {
+				return resp, err
+			}
+
+			rr := i.queryRangeTraceQLToProto(r)
+			return &tempopb.QueryRangeResponse{
+				Series: rr,
+			}, nil
+		default:
+		}
+	}
+
+	return resp, fmt.Errorf("localblocks processor not found")
+}
+
+func (i *instance) queryRangeTraceQLToProto(set traceql.SeriesSet) []*tempopb.TimeSeries {
+	resp := make([]*tempopb.TimeSeries, 0, len(set))
+
+	for l, s := range set {
+		labels := make([]commonv1proto.KeyValue, 0, len(l))
+		for _, label := range s.Labels {
+			labels = append(labels,
+				commonv1proto.KeyValue{
+					Key:   label.Key.String(),
+					Value: label.Value.AsAnyValue(),
+				},
+			)
+		}
+
+		// TODO: convert samples
+		// samples := make([]tempopb.Sample, 0)
+		// for _, value := range s.Values {
+		// 	s := tempopb.Sample{}
+		// }
+
+		ss := &tempopb.TimeSeries{
+			Labels: labels,
+			// Samples: samples,
+		}
+
+		resp = append(resp, ss)
+	}
+
+	return resp
 }
 
 func (i *instance) updatePushMetrics(bytesIngested int, spanCount int, expiredSpanCount int) {

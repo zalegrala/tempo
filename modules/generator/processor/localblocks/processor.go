@@ -388,7 +388,7 @@ func (p *Processor) GetMetrics(ctx context.Context, req *tempopb.SpanMetricsRequ
 }
 
 // QueryRange returns metrics.
-func (p *Processor) QueryRange(ctx context.Context, req traceql.MetricsQueryRangeRequest) (traceql.SeriesSet, error) {
+func (p *Processor) QueryRange(ctx context.Context, req *tempopb.QueryRangeRequest) (traceql.SeriesSet, error) {
 	p.blocksMtx.RLock()
 	defer p.blocksMtx.RUnlock()
 

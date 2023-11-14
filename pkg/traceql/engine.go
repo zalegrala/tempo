@@ -314,7 +314,7 @@ func (e *Engine) asTraceSearchMetadata(spanset *Spanset) *tempopb.TraceSearchMet
 				continue
 			}
 
-			staticAnyValue := static.asAnyValue()
+			staticAnyValue := static.AsAnyValue()
 
 			keyValue := &common_v1.KeyValue{
 				Key:   attribute.Name,
@@ -341,7 +341,7 @@ func (e *Engine) asTraceSearchMetadata(spanset *Spanset) *tempopb.TraceSearchMet
 			continue
 		}
 
-		staticAnyValue := att.Val.asAnyValue()
+		staticAnyValue := att.Val.AsAnyValue()
 		keyValue := &common_v1.KeyValue{
 			Key:   att.Name,
 			Value: staticAnyValue,
@@ -356,7 +356,7 @@ func unixSecToNano(ts uint32) uint64 {
 	return uint64(ts) * uint64(time.Second/time.Nanosecond)
 }
 
-func (s Static) asAnyValue() *common_v1.AnyValue {
+func (s Static) AsAnyValue() *common_v1.AnyValue {
 	switch s.Type {
 	case TypeInt:
 		return &common_v1.AnyValue{

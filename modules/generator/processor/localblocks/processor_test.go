@@ -8,7 +8,6 @@ import (
 
 	"github.com/grafana/tempo/pkg/tempopb"
 	v1 "github.com/grafana/tempo/pkg/tempopb/trace/v1"
-	"github.com/grafana/tempo/pkg/traceql"
 	"github.com/grafana/tempo/pkg/util/test"
 	"github.com/grafana/tempo/tempodb/backend"
 	"github.com/grafana/tempo/tempodb/encoding"
@@ -124,8 +123,8 @@ func TestProcessorDoesNotRace(t *testing.T) {
 	})
 
 	go concurrent(func() {
-		_, err := p.QueryRange(ctx, traceql.MetricsQueryRangeRequest{
-			Q:     "{} | rate()",
+		_, err := p.QueryRange(ctx, &tempopb.QueryRangeRequest{
+			Query: "{} | rate()",
 			Start: uint64(time.Now().Add(-5 * time.Minute).UnixNano()),
 			End:   uint64(time.Now().UnixNano()),
 			Step:  uint64(30 * time.Second),
