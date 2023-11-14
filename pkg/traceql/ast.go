@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math"
 	"time"
+
+	"github.com/grafana/tempo/pkg/tempopb"
 )
 
 type Element interface {
@@ -14,7 +16,7 @@ type Element interface {
 type metricsFirstStageElement interface {
 	Element
 	extractConditions(request *FetchSpansRequest)
-	init(MetricsQueryRangeRequest)
+	init(*tempopb.QueryRangeRequest)
 	observe(Span) // TODO - batching?
 	result() SeriesSet
 }
@@ -764,7 +766,7 @@ func (a *MetricsAggregate) extractConditions(request *FetchSpansRequest) {
 	request.SecondPassConditions = append(request.SecondPassConditions, selectR.Conditions...)
 }
 
-func (a *MetricsAggregate) init(q MetricsQueryRangeRequest) {
+func (a *MetricsAggregate) init(q *tempopb.QueryRangeRequest) {
 	var innerAgg func() VectorAggregator
 
 	switch a.op {
