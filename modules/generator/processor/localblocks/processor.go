@@ -387,6 +387,56 @@ func (p *Processor) GetMetrics(ctx context.Context, req *tempopb.SpanMetricsRequ
 	return resp, nil
 }
 
+// QueryRange returns metrics.
+func (p *Processor) QueryRange(ctx context.Context, req traceql.MetricsQueryRangeRequest) (traceql.SeriesSet, error) {
+	p.blocksMtx.RLock()
+	defer p.blocksMtx.RUnlock()
+
+	cutoff := time.Now().Add(-p.Cfg.CompleteBlockTimeout).Add(-timeBuffer)
+	if req.Start < uint64(cutoff.UnixNano()) {
+		return nil, fmt.Errorf("time range must be within last %v", p.Cfg.CompleteBlockTimeout)
+	}
+
+	// Blocks to check
+	blocks := make([]common.BackendBlock, 0, 1+len(p.walBlocks)+len(p.completeBlocks))
+	if p.headBlock != nil {
+		blocks = append(blocks, p.headBlock)
+	}
+	for _, b := range p.walBlocks {
+		blocks = append(blocks, b)
+	}
+	for _, b := range p.completeBlocks {
+		blocks = append(blocks, b)
+	}
+
+	eval, err := traceql.NewEngine().CompileMetricsQueryRange(req)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, b := range blocks {
+
+		start := uint64(b.BlockMeta().StartTime.UnixNano())
+		end := uint64(b.BlockMeta().EndTime.UnixNano())
+		if start > req.End || end < req.Start {
+			// Out of time range
+			continue
+		}
+
+		// TODO - caching
+		f := traceql.NewSpansetFetcherWrapper(func(ctx context.Context, req traceql.FetchSpansRequest) (traceql.FetchSpansResponse, error) {
+			return b.Fetch(ctx, req, common.DefaultSearchOptions())
+		})
+
+		err = eval.Do(ctx, f)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return eval.Results()
+}
+
 func (p *Processor) metricsCacheGet(key string) *traceqlmetrics.MetricsResults {
 	p.cacheMtx.RLock()
 	defer p.cacheMtx.RUnlock()
