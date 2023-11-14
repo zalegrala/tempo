@@ -55,7 +55,7 @@ const (
 
 	// generator summary
 	urlParamGroupBy = "groupBy"
-	urlParamMetric  = "metric"
+	// urlParamMetric  = "metric"
 
 	HeaderAccept         = "Accept"
 	HeaderContentType    = "Content-Type"
@@ -428,8 +428,8 @@ func ParseSpanMetricsSummaryRequest(r *http.Request) (*tempopb.SpanMetricsSummar
 	return req, nil
 }
 
-func ParseSpanMetricsSelectRequest(r *http.Request) (*tempopb.SpanMetricsSelectRequest, error) {
-	req := &tempopb.SpanMetricsSelectRequest{}
+func ParseQueryRangeRequest(r *http.Request) (*tempopb.QueryRangeRequest, error) {
+	req := &tempopb.QueryRangeRequest{}
 
 	query := r.URL.Query().Get(urlParamQuery)
 	req.Query = query
@@ -458,7 +458,7 @@ func ParseSpanMetricsSelectRequest(r *http.Request) (*tempopb.SpanMetricsSelectR
 		if err != nil {
 			return nil, fmt.Errorf("invalid start: %w", err)
 		}
-		req.Start = uint32(start)
+		req.Start = uint64(start)
 	}
 
 	if s, ok := extractQueryParam(r, urlParamEnd); ok {
@@ -466,22 +466,7 @@ func ParseSpanMetricsSelectRequest(r *http.Request) (*tempopb.SpanMetricsSelectR
 		if err != nil {
 			return nil, fmt.Errorf("invalid end: %w", err)
 		}
-		req.End = uint32(end)
-	}
-
-	metric := r.URL.Query().Get(urlParamMetric)
-	switch {
-	case metric == "p99":
-		req.Metric = tempopb.SpanMetricsSelectRequest_P99
-	case metric == "p90":
-		req.Metric = tempopb.SpanMetricsSelectRequest_P90
-	case metric == "p50":
-		req.Metric = tempopb.SpanMetricsSelectRequest_P50
-	case metric == "errorrate":
-		req.Metric = tempopb.SpanMetricsSelectRequest_ERRORRATE
-	default:
-		req.Metric = tempopb.SpanMetricsSelectRequest_P90
-		// return nil, fmt.Errorf("invalid metric: %s", metric)
+		req.End = uint64(end)
 	}
 
 	return req, nil
