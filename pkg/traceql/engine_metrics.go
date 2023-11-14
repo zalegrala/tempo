@@ -5,18 +5,11 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/grafana/tempo/pkg/tempopb"
 	"github.com/grafana/tempo/pkg/util"
 )
 
 const maxGroupBys = 5 // TODO - Delete me
-
-// TODO - Move me to tempopb proto
-type MetricsQueryRangeRequest struct {
-	Q          string
-	Start, End uint64 // Time window in unix nanoseconds. Start inclusive, end exclusive
-	Step       uint64 // Step duration in nanoseconds (30s, 1m, 1h)
-	Shard, Of  int
-}
 
 type Label struct {
 	Key   Attribute
@@ -214,7 +207,7 @@ func (u *UngroupedAggregator) Series() SeriesSet {
 }
 
 // ExecuteMetricsQueryRange - Execute the given metrics query
-func (e *Engine) ExecuteMetricsQueryRange(ctx context.Context, req MetricsQueryRangeRequest, fetcher SpansetFetcher) (results SeriesSet, err error) {
+func (e *Engine) ExecuteMetricsQueryRange(ctx context.Context, req *tempopb.QueryRangeRequest, fetcher SpansetFetcher) (results SeriesSet, err error) {
 	eval, err := e.CompileMetricsQueryRange(req)
 	if err != nil {
 		return nil, err
@@ -228,7 +221,7 @@ func (e *Engine) ExecuteMetricsQueryRange(ctx context.Context, req MetricsQueryR
 	return eval.Results()
 }
 
-func (e *Engine) CompileMetricsQueryRange(req MetricsQueryRangeRequest) (*MetricsEvalulator, error) {
+func (e *Engine) CompileMetricsQueryRange(req *tempopb.QueryRangeRequest) (*MetricsEvalulator, error) {
 	if req.Start <= 0 {
 		return nil, fmt.Errorf("start required")
 	}
@@ -243,7 +236,7 @@ func (e *Engine) CompileMetricsQueryRange(req MetricsQueryRangeRequest) (*Metric
 	}
 
 	// TODO - This needs to validate the non-metrics pipeline too
-	eval, metricsPipeline, storageReq, err := e.Compile(req.Q)
+	eval, metricsPipeline, storageReq, err := e.Compile(req.Query)
 	if err != nil {
 		return nil, fmt.Errorf("compiling query: %w", err)
 	}
@@ -259,8 +252,8 @@ func (e *Engine) CompileMetricsQueryRange(req MetricsQueryRangeRequest) (*Metric
 		endValue   = NewStaticInt(int(req.End))
 	)
 
-	storageReq.Shard = req.Shard
-	storageReq.Of = req.Of
+	storageReq.Shard = int(req.Shard)
+	storageReq.Of = int(req.Of)
 	storageReq.StartTimeUnixNanos = req.Start
 	storageReq.EndTimeUnixNanos = req.End
 	storageReq.Conditions = append(storageReq.Conditions, Condition{Attribute: NewIntrinsic(IntrinsicTraceID)})
@@ -335,7 +328,7 @@ func (e *MetricsEvalulator) Do(ctx context.Context, f SpansetFetcher) error {
 		ss.Release()
 	}
 
-	//fmt.Println(traceIDLengthCounts)
+	// fmt.Println(traceIDLengthCounts)
 	return nil
 }
 
