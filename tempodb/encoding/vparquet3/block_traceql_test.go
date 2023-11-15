@@ -692,10 +692,6 @@ func BenchmarkBackendBlockMetricsQueryRange(b *testing.B) {
 	}
 }
 
-func TestStuff(t *testing.T) {
-	NewTraceIDShardingPredicate(1, 5)
-}
-
 func TestCrap(b *testing.T) {
 	var (
 		ctx      = context.TODO()
@@ -720,24 +716,59 @@ func TestCrap(b *testing.T) {
 	_, _, err = block.openForSearch(ctx, opts)
 	require.NoError(b, err)
 
-	req := &tempopb.QueryRangeRequest{
-		Start: uint64(meta.StartTime.UnixNano()),
-		End:   uint64(meta.EndTime.UnixNano()),
-		Step:  uint64(time.Hour),
-		Query: "{} | count_over_time()",
-		Of:    255,
-	}
-
 	f := traceql.NewSpansetFetcherWrapper(func(ctx context.Context, req traceql.FetchSpansRequest) (traceql.FetchSpansResponse, error) {
 		return block.Fetch(ctx, req, opts)
 	})
 
-	for i := uint32(1); i <= req.Of; i++ {
-		req.Shard = i
-		res, err := e.ExecuteMetricsQueryRange(ctx, req, f)
-		require.NoError(b, err)
+	step := 1 * time.Second
+	shardInterval := 5 * time.Minute
 
-		// 11,265,136
-		fmt.Println(i, res[traceql.LabelSet{}])
+	metaStart := time.Unix(0, meta.StartTime.UnixNano()/int64(step)*int64(step))
+	metaEnd := time.Unix(0, (meta.EndTime.UnixNano()/int64(step)+1)*int64(step))
+	fmt.Println("Stepped meta start:", metaStart)
+	fmt.Println("Stepped meta end  :", metaEnd)
+
+	timeShards := int(metaEnd.Sub(metaStart)/shardInterval) + 1
+
+	total := 0.0
+
+	req := &tempopb.QueryRangeRequest{
+		Step: uint64(step),
+		//Query:    `{resource.service.name="tempo-gateway"} | count_over_time()`,
+		Query: `{} | count_over_time()`,
+		Of:    1,
 	}
+
+	fmt.Println("Query:", req.Query)
+
+	for i := uint32(1); i <= req.Of; i++ {
+		for j := 0; j < timeShards; j++ {
+			start := metaStart.Add(shardInterval * time.Duration(j))
+			end := start.Add(time.Duration(shardInterval))
+			req.Start = uint64(start.UnixNano())
+			req.End = uint64(end.UnixNano())
+			req.Shard = i
+
+			eval, err := e.CompileMetricsQueryRange(req)
+			require.NoError(b, err)
+
+			eval.Do(ctx, f)
+
+			res, err := eval.Results()
+			require.NoError(b, err)
+
+			for _, series := range res {
+				fmt.Println(i, j, start, end, series)
+			}
+
+			for _, series := range res {
+				for _, f := range series.Values {
+					total += f
+				}
+			}
+		}
+	}
+
+	// 11,265,136 spans in the block
+	fmt.Println("total:", int(total))
 }

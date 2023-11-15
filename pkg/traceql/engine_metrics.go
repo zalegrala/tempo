@@ -246,34 +246,69 @@ func (e *Engine) CompileMetricsQueryRange(req *tempopb.QueryRangeRequest) (*Metr
 		return nil, err
 	}
 
-	var (
-		startTime  = NewIntrinsic(IntrinsicSpanStartTime)
-		startValue = NewStaticInt(int(req.Start))
-		endValue   = NewStaticInt(int(req.End))
-	)
+	// TODO - filter on trace timestamp here? Need to see if possible and correct
 
-	storageReq.Shard = int(req.Shard)
-	storageReq.Of = int(req.Of)
+	// This initializes all step buffers, counters, etc
+	metricsPipeline.init(req)
+
+	me := &MetricsEvalulator{
+		storageReq:      storageReq,
+		metricsPipeline: metricsPipeline,
+	}
+
+	if req.Of > 1 {
+		// Trace id sharding
+		// Select traceID if not already present.  It must be in the first pass
+		// so that we only evalulate our traces.
+		storageReq.Shard = int(req.Shard)
+		storageReq.Of = int(req.Of)
+		traceID := NewIntrinsic(IntrinsicTraceID)
+		if !storageReq.HasAttribute(traceID) {
+			storageReq.Conditions = append(storageReq.Conditions, Condition{Attribute: traceID})
+		}
+	}
+
+	// Sharding algorithm
+	// In order to scale out queries like {A} >> {B} | rate()  we need specific
+	// rules about the data is divided across time boundary shards.  These
+	// spans can cross hours or days and the simple idea to just check span
+	// start time won't work.
+	// Therefore results are matched with the following rules:
+	// (1) Evalulate the query for any overlapping trace
+	// (2) For any matching spans: only include the ones that started in this time frame.
+	// This will increase redundant trace evalulation, but it ensures that matching spans are
+	// gauranteed to be found and included in the metrcs.
+	startTime := NewIntrinsic(IntrinsicSpanStartTime)
+	if !storageReq.HasAttribute(startTime) {
+		if storageReq.AllConditions {
+			// The most efficient case.  We can add it to the primary pass
+			// without affecting correctness. And this lets us avoid the
+			// entire second pass.
+			storageReq.Conditions = append(storageReq.Conditions, Condition{Attribute: startTime})
+		} else {
+			// Complex query with a second pass. In this case it is better to
+			// add it to the second pass so that it's only returned for the matches.
+			storageReq.SecondPassConditions = append(storageReq.SecondPassConditions, Condition{Attribute: startTime})
+		}
+	}
+	// (1) any overlapping trace
 	storageReq.StartTimeUnixNanos = req.Start
 	storageReq.EndTimeUnixNanos = req.End
-	storageReq.Conditions = append(storageReq.Conditions, Condition{Attribute: NewIntrinsic(IntrinsicTraceID)})
-	storageReq.Conditions = append(storageReq.Conditions, Condition{Attribute: startTime, Op: OpGreaterEqual, Operands: []Static{startValue}}) // move this to ast extractConditions?
-	storageReq.Conditions = append(storageReq.Conditions, Condition{Attribute: startTime, Op: OpLess, Operands: []Static{endValue}})
+	// (2) Only include spans that started in this time frame.
+	//     This is checked inside the evaluator
+	me.checkTime = true
+	me.start = req.Start
+	me.end = req.End
 
-	// We don't need a second pass for some cases - i think??
+	// Avoid a second pass when not needed for much better performance.
+	// TODO - Is there any case where eval() needs to be called but AllConditions=true?
 	if !storageReq.AllConditions || len(storageReq.SecondPassConditions) > 0 {
 		storageReq.SecondPass = func(s *Spanset) ([]*Spanset, error) {
 			return eval([]*Spanset{s})
 		}
 	}
 
-	// This initializes all step buffers, counters, etc
-	metricsPipeline.init(req)
-
-	return &MetricsEvalulator{
-		storageReq:      *storageReq,
-		metricsPipeline: metricsPipeline,
-	}, nil
+	return me, nil
 }
 
 func lookup(needles []Attribute, haystack map[Attribute]Static) Static {
@@ -287,20 +322,20 @@ func lookup(needles []Attribute, haystack map[Attribute]Static) Static {
 }
 
 type MetricsEvalulator struct {
-	storageReq      FetchSpansRequest
+	start, end      uint64
+	checkTime       bool
+	storageReq      *FetchSpansRequest
 	metricsPipeline metricsFirstStageElement
 }
 
 func (e *MetricsEvalulator) Do(ctx context.Context, f SpansetFetcher) error {
-	fetch, err := f.Fetch(ctx, e.storageReq)
+	fetch, err := f.Fetch(ctx, *e.storageReq)
 	if errors.Is(err, util.ErrUnsupported) {
 		return nil
 	}
 	if err != nil {
-		return nil
+		return err
 	}
-
-	traceIDLengthCounts := make([]int, 17)
 
 	defer fetch.Results.Close()
 
@@ -313,22 +348,20 @@ func (e *MetricsEvalulator) Do(ctx context.Context, f SpansetFetcher) error {
 			break
 		}
 
-		traceID := ss.TraceID
-		for i := 0; i < 16; i++ {
-			if traceID[i] > 0 {
-				traceIDLengthCounts[16-i]++
-				break
-			}
-		}
-
 		for _, s := range ss.Spans {
+			if e.checkTime {
+				st := s.StartTimeUnixNanos()
+				if st < e.start || st >= e.end {
+					continue
+				}
+			}
+
 			e.metricsPipeline.observe(s)
 		}
 
 		ss.Release()
 	}
 
-	// fmt.Println(traceIDLengthCounts)
 	return nil
 }
 
