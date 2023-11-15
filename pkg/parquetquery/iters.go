@@ -1370,11 +1370,11 @@ func NewLeftJoinIterator(definitionLevel int, required, optional []Iterator, pre
 }
 
 func (j *LeftJoinIterator) String() string {
-	srequired := "required: "
+	srequired := "  required: "
 	for _, r := range j.required {
 		srequired += "\n\t" + util.TabOut(r)
 	}
-	soptional := "optional: "
+	soptional := "  optional: "
 	for _, o := range j.optional {
 		soptional += "\n\t" + util.TabOut(o)
 	}
