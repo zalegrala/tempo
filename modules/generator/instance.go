@@ -435,13 +435,8 @@ func (i *instance) queryRangeTraceQLToProto(set traceql.SeriesSet, req *tempopb.
 		intervals := traceql.IntervalCount(req.Start, req.End, req.Step)
 		samples := make([]tempopb.Sample, 0, intervals)
 		for i, value := range s.Values {
-			var fix uint64
 
-			if req.Start%req.Step != 0 {
-				fix = req.Step - (req.Start % req.Step)
-			}
-
-			ts := req.Start + uint64(i*int(req.Step)) + fix
+			ts := traceql.TimestampOf(uint64(i), req.Start, req.Step)
 
 			samples = append(samples, tempopb.Sample{
 				TimestampMs: time.Unix(0, int64(ts)).UnixMilli(),

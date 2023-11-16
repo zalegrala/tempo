@@ -350,31 +350,31 @@ func Test_instanceQueryRangeTraceQLToProto(t *testing.T) {
 				},
 				Samples: []tempopb.Sample{
 					{
-						TimestampMs: 1700143710000,
+						TimestampMs: 1700143700617,
 						Value:       17.566666666666666,
 					},
 					{
-						TimestampMs: 1700143740000,
+						TimestampMs: 1700143730617,
 						Value:       18.133333333333333,
 					},
 					{
-						TimestampMs: 1700143770000,
+						TimestampMs: 1700143760617,
 						Value:       17.3,
 					},
 					{
-						TimestampMs: 1700143800000,
+						TimestampMs: 1700143790617,
 						Value:       14.533333333333333,
 					},
 					{
-						TimestampMs: 1700143830000,
+						TimestampMs: 1700143820617,
 						Value:       0,
 					},
 					{
-						TimestampMs: 1700143860000,
+						TimestampMs: 1700143850617,
 						Value:       0,
 					},
 					{
-						TimestampMs: 1700143890000,
+						TimestampMs: 1700143880617,
 						Value:       0,
 					},
 				},
