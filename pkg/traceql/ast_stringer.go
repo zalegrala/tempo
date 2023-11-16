@@ -118,7 +118,7 @@ func (a Attribute) String() string {
 	}
 
 	// Top-level attributes get a "." but top-level intrinsics don't
-	if scope == "" && a.Intrinsic == IntrinsicNone {
+	if scope == "" && a.Intrinsic == IntrinsicNone && len(att) > 0 {
 		scope += "."
 	}
 
