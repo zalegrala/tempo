@@ -384,7 +384,7 @@ func (e *MetricsEvalulator) Do(ctx context.Context, f SpansetFetcher) error {
 	for {
 		ss, err := fetch.Results.Next(ctx)
 		if err != nil {
-			return nil
+			return err
 		}
 		if ss == nil {
 			break
