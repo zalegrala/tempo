@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -32,6 +33,7 @@ const (
 	urlParamStart           = "start"
 	urlParamEnd             = "end"
 	urlParamSpansPerSpanSet = "spss"
+	urlParamStep            = "step"
 
 	// backend search (querier/serverless)
 	urlParamStartPage        = "startPage"
@@ -54,6 +56,7 @@ const (
 
 	// generator summary
 	urlParamGroupBy = "groupBy"
+	// urlParamMetric  = "metric"
 
 	HeaderAccept         = "Accept"
 	HeaderContentType    = "Content-Type"
@@ -73,6 +76,7 @@ const (
 	PathUsageStats         = "/status/usage-stats"
 	PathSpanMetrics        = "/api/metrics"
 	PathSpanMetricsSummary = "/api/metrics/summary"
+	PathMetricsQueryRange  = "/api/metrics/query_range"
 
 	// PathOverrides user configurable overrides
 	PathOverrides = "/api/overrides"
@@ -420,6 +424,58 @@ func ParseSpanMetricsSummaryRequest(r *http.Request) (*tempopb.SpanMetricsSummar
 			return nil, fmt.Errorf("invalid end: %w", err)
 		}
 		req.End = uint32(end)
+	}
+
+	return req, nil
+}
+
+func ParseQueryRangeRequest(r *http.Request) (*tempopb.QueryRangeRequest, error) {
+	req := &tempopb.QueryRangeRequest{}
+
+	query := r.URL.Query().Get(urlParamQuery)
+	req.Query = query
+
+	// Prometheus params
+	if q2 := r.URL.Query().Get("query"); q2 != "" {
+		req.Query = q2
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > 0 {
+		v, err := url.ParseQuery(string(body))
+		if err != nil {
+			return nil, err
+		}
+		if q2 := v.Get("query"); q2 != "" {
+			req.Query = q2
+		}
+	}
+	// fmt.Println(string(body))
+
+	if s, ok := extractQueryParam(r, urlParamStart); ok {
+		start, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid start: %w", err)
+		}
+		req.Start = uint64(start)
+	}
+
+	if s, ok := extractQueryParam(r, urlParamEnd); ok {
+		end, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid end: %w", err)
+		}
+		req.End = uint64(end)
+	}
+
+	if s, ok := extractQueryParam(r, urlParamStep); ok {
+		step, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid step: %w", err)
+		}
+		req.Step = uint64(step)
 	}
 
 	return req, nil
