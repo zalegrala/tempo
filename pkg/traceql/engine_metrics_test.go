@@ -15,11 +15,12 @@ func TestDefaultQueryRangeStep(t *testing.T) {
 		expected   time.Duration
 	}{
 		{time.Unix(0, 0), time.Unix(100, 0), time.Second},
-		{time.Unix(0, 0), time.Unix(3600, 0), 14 * time.Second},
+		{time.Unix(0, 0), time.Unix(600, 0), 5 * time.Second},
+		{time.Unix(0, 0), time.Unix(3600, 0), 30 * time.Second},
 	}
 
 	for _, c := range tc {
-		require.Equal(t, c.expected, DefaultQueryRangeStep(c.start, c.end))
+		require.Equal(t, c.expected, time.Duration(DefaultQueryRangeStep(uint64(c.start.UnixNano()), uint64(c.end.UnixNano()))))
 	}
 }
 

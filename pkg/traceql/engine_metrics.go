@@ -4,15 +4,33 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/grafana/tempo/pkg/tempopb"
 	"github.com/grafana/tempo/pkg/util"
 )
 
-func DefaultQueryRangeStep(start time.Time, end time.Time) time.Duration {
-	return time.Duration(math.Max(math.Floor(end.Sub(start).Seconds()/250), 1)) * time.Second
+func DefaultQueryRangeStep(start, end uint64) uint64 {
+
+	delta := time.Duration(end - start)
+
+	// Try to get this many data points
+	// Our baseline is is 1 hour @ 30s intervals
+	baseline := delta / 120
+
+	// Round down in intervals of 5s
+	interval := baseline / (5 * time.Second) * (5 * time.Second)
+
+	if interval < 5*time.Second {
+		// Round down in intervals of 1s
+		interval = baseline / time.Second * time.Second
+	}
+
+	if interval < time.Second {
+		return uint64(time.Second.Nanoseconds())
+	}
+
+	return uint64(interval.Nanoseconds())
 }
 
 // IntervalCount is the number of intervals in the range with step.
