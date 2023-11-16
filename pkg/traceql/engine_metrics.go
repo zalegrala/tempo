@@ -92,7 +92,7 @@ type StepAggregator struct {
 var _ RangeAggregator = (*StepAggregator)(nil)
 
 func NewStepAggregator(start, end, step uint64, innerAgg func() VectorAggregator) *StepAggregator {
-	intervals := (end - start) / step
+	_, _, intervals := StepRangeToIntervals(start, end, step)
 	vectors := make([]VectorAggregator, intervals+1)
 	for i := range vectors {
 		vectors[i] = innerAgg()
@@ -104,6 +104,11 @@ func NewStepAggregator(start, end, step uint64, innerAgg func() VectorAggregator
 		step:    step,
 		vectors: vectors,
 	}
+}
+
+func StepRangeToIntervals(start, end, step uint64) (uint64, uint64, uint64) {
+	intervals := (end - start) / step
+	return start, end, intervals
 }
 
 func (s *StepAggregator) Observe(span Span) {
