@@ -11,10 +11,30 @@ import (
 	"github.com/grafana/tempo/pkg/util"
 )
 
-const maxGroupBys = 5 // TODO - Delete me
-
 func DefaultQueryRangeStep(start time.Time, end time.Time) time.Duration {
 	return time.Duration(math.Max(math.Floor(end.Sub(start).Seconds()/250), 1)) * time.Second
+}
+
+// IntervalCount is the number of intervals in the range with step.
+func IntervalCount(start, end, step uint64) int {
+	intervals := (end - start) / step
+	intervals++
+	return int(intervals)
+}
+
+// TimestampOf the given interval with the start and step.
+func TimestampOf(interval, start, step uint64) uint64 {
+	return start + interval*step
+}
+
+// IntervalOf the given timestamp within the range and step.
+func IntervalOf(ts, start, end, step uint64) int {
+	if ts < start || ts > end || end == start || step == 0 {
+		// Invalid
+		return -1
+	}
+
+	return int((ts - start) / step)
 }
 
 type Label struct {
@@ -22,7 +42,8 @@ type Label struct {
 	Value Static
 }
 
-type LabelSet [5]Label
+const maxGroupBys = 5 // TODO - Delete me
+type LabelSet [maxGroupBys]Label
 
 type TimeSeries struct {
 	Labels LabelSet
@@ -92,8 +113,8 @@ type StepAggregator struct {
 var _ RangeAggregator = (*StepAggregator)(nil)
 
 func NewStepAggregator(start, end, step uint64, innerAgg func() VectorAggregator) *StepAggregator {
-	_, _, intervals := StepRangeToIntervals(start, end, step)
-	vectors := make([]VectorAggregator, intervals+1)
+	intervals := IntervalCount(start, end, step)
+	vectors := make([]VectorAggregator, intervals)
 	for i := range vectors {
 		vectors[i] = innerAgg()
 	}
@@ -104,11 +125,6 @@ func NewStepAggregator(start, end, step uint64, innerAgg func() VectorAggregator
 		step:    step,
 		vectors: vectors,
 	}
-}
-
-func StepRangeToIntervals(start, end, step uint64) (uint64, uint64, uint64) {
-	intervals := (end - start) / step
-	return start, end, intervals
 }
 
 func (s *StepAggregator) Observe(span Span) {

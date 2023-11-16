@@ -23,6 +23,75 @@ func TestDefaultQueryRangeStep(t *testing.T) {
 	}
 }
 
+func TestStepRangeToIntervals(t *testing.T) {
+	tc := []struct {
+		start, end, step uint64
+		expected         int
+	}{
+		{
+			start:    0,
+			end:      1,
+			step:     1,
+			expected: 2, // 0, 1, even multiple
+		},
+		{
+			start:    0,
+			end:      10,
+			step:     3,
+			expected: 4, // 0, 3, 6, 9
+		},
+	}
+
+	for _, c := range tc {
+		require.Equal(t, c.expected, IntervalCount(c.start, c.end, c.step))
+	}
+}
+
+func TestTimestampOf(t *testing.T) {
+	tc := []struct {
+		interval, start, step uint64
+		expected              uint64
+	}{
+		{
+			expected: 0,
+		},
+		{
+			interval: 2,
+			start:    10,
+			step:     3,
+			expected: 16,
+		},
+	}
+
+	for _, c := range tc {
+		require.Equal(t, c.expected, TimestampOf(c.interval, c.start, c.step))
+	}
+}
+
+func TestIntervalOf(t *testing.T) {
+	tc := []struct {
+		ts, start, end, step uint64
+		expected             int
+	}{
+		{expected: -1},
+		{
+			ts:   0,
+			end:  1,
+			step: 1,
+		},
+		{
+			ts:       10,
+			end:      10,
+			step:     1,
+			expected: 10,
+		},
+	}
+
+	for _, c := range tc {
+		require.Equal(t, c.expected, IntervalOf(c.ts, c.start, c.end, c.step))
+	}
+}
+
 func TestCompileMetricsQueryRange(t *testing.T) {
 	tc := map[string]struct {
 		q           string

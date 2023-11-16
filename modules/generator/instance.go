@@ -432,7 +432,7 @@ func (i *instance) queryRangeTraceQLToProto(set traceql.SeriesSet, req *tempopb.
 			)
 		}
 
-		_, _, intervals := traceql.StepRangeToIntervals(req.Start, req.End, req.Step)
+		intervals := traceql.IntervalCount(req.Start, req.End, req.Step)
 		samples := make([]tempopb.Sample, 0, intervals)
 		for i, value := range s.Values {
 			var fix uint64
