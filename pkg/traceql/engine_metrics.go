@@ -4,12 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"time"
 
 	"github.com/grafana/tempo/pkg/tempopb"
 	"github.com/grafana/tempo/pkg/util"
 )
 
 const maxGroupBys = 5 // TODO - Delete me
+
+func DefaultQueryRangeStep(start time.Time, end time.Time) time.Duration {
+	return time.Duration(math.Max(math.Floor(end.Sub(start).Seconds()/250), 1)) * time.Second
+}
 
 type Label struct {
 	Key   Attribute
@@ -206,7 +212,7 @@ func (u *UngroupedAggregator) Series() SeriesSet {
 	}
 }
 
-// ExecuteMetricsQueryRange - Execute the given metrics query
+// ExecuteMetricsQueryRange - Execute the given metrics query. Just a wrapper around CompileMetricsQueryRange
 func (e *Engine) ExecuteMetricsQueryRange(ctx context.Context, req *tempopb.QueryRangeRequest, fetcher SpansetFetcher) (results SeriesSet, err error) {
 	eval, err := e.CompileMetricsQueryRange(req)
 	if err != nil {
@@ -221,6 +227,7 @@ func (e *Engine) ExecuteMetricsQueryRange(ctx context.Context, req *tempopb.Quer
 	return eval.Results()
 }
 
+// CompileMetricsQueryRange returns an evalulator that can be reused across multiple data sources.
 func (e *Engine) CompileMetricsQueryRange(req *tempopb.QueryRangeRequest) (*MetricsEvalulator, error) {
 	if req.Start <= 0 {
 		return nil, fmt.Errorf("start required")
@@ -235,18 +242,14 @@ func (e *Engine) CompileMetricsQueryRange(req *tempopb.QueryRangeRequest) (*Metr
 		return nil, fmt.Errorf("step required")
 	}
 
-	// TODO - This needs to validate the non-metrics pipeline too
 	eval, metricsPipeline, storageReq, err := e.Compile(req.Query)
 	if err != nil {
 		return nil, fmt.Errorf("compiling query: %w", err)
 	}
 
-	err = metricsPipeline.validate()
-	if err != nil {
-		return nil, err
+	if metricsPipeline == nil {
+		return nil, fmt.Errorf("not a metrics query")
 	}
-
-	// TODO - filter on trace timestamp here? Need to see if possible and correct
 
 	// This initializes all step buffers, counters, etc
 	metricsPipeline.init(req)
@@ -293,7 +296,7 @@ func (e *Engine) CompileMetricsQueryRange(req *tempopb.QueryRangeRequest) (*Metr
 	}
 	// (1) any overlapping trace
 	storageReq.StartTimeUnixNanos = req.Start
-	storageReq.EndTimeUnixNanos = req.End
+	storageReq.EndTimeUnixNanos = req.End // Should this be exclusive?
 	// (2) Only include spans that started in this time frame.
 	//     This is checked inside the evaluator
 	me.checkTime = true

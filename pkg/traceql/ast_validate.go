@@ -16,7 +16,16 @@ func (e *unsupportedError) Error() string {
 }
 
 func (r RootExpr) validate() error {
-	return r.Pipeline.validate()
+	err := r.Pipeline.validate()
+	if err != nil {
+		return err
+	}
+
+	if r.MetricsPipeline != nil {
+		return r.MetricsPipeline.validate()
+	}
+
+	return nil
 }
 
 func (p Pipeline) validate() error {

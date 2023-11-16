@@ -34,9 +34,11 @@ func (e *Engine) Compile(query string) (func(input []*Spanset) (result []*Spanse
 	req := &FetchSpansRequest{
 		AllConditions: true,
 	}
-	expr.Pipeline.extractConditions(req)
-	if expr.MetricsPipeline != nil {
-		expr.MetricsPipeline.extractConditions(req)
+	expr.extractConditions(req)
+
+	err = expr.validate()
+	if err != nil {
+		return nil, nil, nil, err
 	}
 
 	return expr.Pipeline.evaluate, expr.MetricsPipeline, req, nil
