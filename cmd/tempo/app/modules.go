@@ -276,6 +276,9 @@ func (t *App) initGenerator() (services.Service, error) {
 	spanStatsHandler := t.HTTPAuthMiddleware.Wrap(http.HandlerFunc(t.generator.SpanMetricsHandler))
 	t.Server.HTTP.Handle(path.Join(api.PathPrefixGenerator, addHTTPAPIPrefix(&t.cfg, api.PathSpanMetrics)), spanStatsHandler)
 
+	queryRangeHandler := t.HTTPAuthMiddleware.Wrap(http.HandlerFunc(t.generator.QueryRangeHandler))
+	t.Server.HTTP.Handle(path.Join(api.PathPrefixGenerator, addHTTPAPIPrefix(&t.cfg, api.PathMetricsQueryRange)), queryRangeHandler)
+
 	tempopb.RegisterMetricsGeneratorServer(t.Server.GRPC, t.generator)
 
 	return t.generator, nil

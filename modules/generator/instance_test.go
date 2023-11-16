@@ -21,7 +21,9 @@ import (
 	"github.com/grafana/tempo/modules/generator/processor/spanmetrics"
 	"github.com/grafana/tempo/modules/generator/storage"
 	"github.com/grafana/tempo/pkg/tempopb"
+	commonv1proto "github.com/grafana/tempo/pkg/tempopb/common/v1"
 	v1 "github.com/grafana/tempo/pkg/tempopb/trace/v1"
+	"github.com/grafana/tempo/pkg/traceql"
 	"github.com/grafana/tempo/pkg/util/test"
 )
 
@@ -283,6 +285,110 @@ func Test_instance_updateProcessors(t *testing.T) {
 
 		assert.Equal(t, expectedProcessors, actualProcessors)
 	})
+}
+
+func Test_instanceQueryRangeTraceQLToProto(t *testing.T) {
+	cfg := Config{}
+	cfg.RegisterFlagsAndApplyDefaults("", &flag.FlagSet{})
+	logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stdout))
+	overrides := mockOverrides{}
+
+	instance, err := newInstance(&cfg, "test", &overrides, &noopStorage{}, prometheus.DefaultRegisterer, logger, nil)
+	assert.NoError(t, err)
+
+	k1 := traceql.Label{Key: traceql.NewAttribute("."), Value: traceql.NewStaticString("nil")}
+	var ls1 traceql.LabelSet = [5]traceql.Label{k1}
+
+	req := &tempopb.QueryRangeRequest{
+		Query: "{}",
+		Start: 1700143700617413958, // 3 minute window
+		End:   1700143880619139505,
+		Step:  30000000000, // 30 seconds
+	}
+
+	ts := instance.queryRangeTraceQLToProto(traceql.SeriesSet{
+		ls1: traceql.TimeSeries{
+			Labels: ls1,
+			Values: []float64{17.566666666666666, 18.133333333333333, 17.3, 14.533333333333333, 0, 0, 0},
+		},
+	}, req)
+
+	expected := &tempopb.QueryRangeResponse{
+		Series: []*tempopb.TimeSeries{
+			{
+				Labels: []commonv1proto.KeyValue{
+					{
+						Key: "..",
+						Value: &commonv1proto.AnyValue{
+							Value: &commonv1proto.AnyValue_StringValue{StringValue: "nil"},
+						},
+					},
+					{
+						Key: ".",
+						Value: &commonv1proto.AnyValue{
+							Value: &commonv1proto.AnyValue_StringValue{StringValue: "nil"},
+						},
+					},
+					{
+						Key: ".",
+						Value: &commonv1proto.AnyValue{
+							Value: &commonv1proto.AnyValue_StringValue{StringValue: "nil"},
+						},
+					},
+					{
+						Key: ".",
+						Value: &commonv1proto.AnyValue{
+							Value: &commonv1proto.AnyValue_StringValue{StringValue: "nil"},
+						},
+					},
+					{
+						Key: ".",
+						Value: &commonv1proto.AnyValue{
+							Value: &commonv1proto.AnyValue_StringValue{StringValue: "nil"},
+						},
+					},
+				},
+				Samples: []tempopb.Sample{
+					{
+						TimestampMs: 1700143710000,
+						Value:       17.566666666666666,
+					},
+					{
+						TimestampMs: 1700143740000,
+						Value:       18.133333333333333,
+					},
+					{
+						TimestampMs: 1700143770000,
+						Value:       17.3,
+					},
+					{
+						TimestampMs: 1700143800000,
+						Value:       14.533333333333333,
+					},
+					{
+						TimestampMs: 1700143830000,
+						Value:       0,
+					},
+					{
+						TimestampMs: 1700143860000,
+						Value:       0,
+					},
+					{
+						TimestampMs: 1700143890000,
+						Value:       0,
+					},
+				},
+			},
+		},
+	}
+
+	assert.Equal(t, len(expected.Series), len(ts))
+
+	for i, e := range expected.Series {
+		assert.Equal(t, e, ts[i])
+	}
+
+	// require.Equal(t, expected.Series, ts)
 }
 
 type noopStorage struct{}

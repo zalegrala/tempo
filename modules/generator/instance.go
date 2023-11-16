@@ -407,7 +407,7 @@ func (i *instance) QueryRange(ctx context.Context, req *tempopb.QueryRangeReques
 				return resp, err
 			}
 
-			rr := i.queryRangeTraceQLToProto(r)
+			rr := i.queryRangeTraceQLToProto(r, req)
 			return &tempopb.QueryRangeResponse{
 				Series: rr,
 			}, nil
@@ -418,11 +418,11 @@ func (i *instance) QueryRange(ctx context.Context, req *tempopb.QueryRangeReques
 	return resp, fmt.Errorf("localblocks processor not found")
 }
 
-func (i *instance) queryRangeTraceQLToProto(set traceql.SeriesSet) []*tempopb.TimeSeries {
+func (i *instance) queryRangeTraceQLToProto(set traceql.SeriesSet, req *tempopb.QueryRangeRequest) []*tempopb.TimeSeries {
 	resp := make([]*tempopb.TimeSeries, 0, len(set))
 
-	for l, s := range set {
-		labels := make([]commonv1proto.KeyValue, 0, len(l))
+	for _, s := range set {
+		labels := make([]commonv1proto.KeyValue, 0, len(s.Labels))
 		for _, label := range s.Labels {
 			labels = append(labels,
 				commonv1proto.KeyValue{
@@ -432,15 +432,26 @@ func (i *instance) queryRangeTraceQLToProto(set traceql.SeriesSet) []*tempopb.Ti
 			)
 		}
 
-		// TODO: convert samples
-		// samples := make([]tempopb.Sample, 0)
-		// for _, value := range s.Values {
-		// 	s := tempopb.Sample{}
-		// }
+		_, _, intervals := traceql.StepRangeToIntervals(req.Start, req.End, req.Step)
+		samples := make([]tempopb.Sample, 0, intervals)
+		for i, value := range s.Values {
+			var fix uint64
+
+			if req.Start%req.Step != 0 {
+				fix = req.Step - (req.Start % req.Step)
+			}
+
+			ts := req.Start + uint64(i*int(req.Step)) + fix
+
+			samples = append(samples, tempopb.Sample{
+				TimestampMs: time.Unix(0, int64(ts)).UnixMilli(),
+				Value:       value,
+			})
+		}
 
 		ss := &tempopb.TimeSeries{
-			Labels: labels,
-			// Samples: samples,
+			Labels:  labels,
+			Samples: samples,
 		}
 
 		resp = append(resp, ss)
