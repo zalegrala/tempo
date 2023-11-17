@@ -348,8 +348,9 @@ func (t *App) initQuerier() (services.Service, error) {
 
 	queryRangeHandler := t.HTTPAuthMiddleware.Wrap(http.HandlerFunc(t.querier.QueryRangeHandler))
 	t.Server.HTTP.Handle(path.Join(api.PathPrefixQuerier, addHTTPAPIPrefix(&t.cfg, api.PathMetricsQueryRange)), queryRangeHandler)
+	t.Server.HTTP.Handle(path.Join(api.PathPrefixQuerier, addHTTPAPIPrefix(&t.cfg, api.PathPromQueryRange)), queryRangeHandler)
 	// To support the prometheus query_range endpoint, we need to register the handler at the root path.
-	t.Server.HTTP.Handle("/api/v1/query_range", queryRangeHandler)
+	t.Server.HTTP.Handle(api.PathPromQueryRange, queryRangeHandler)
 
 	return t.querier, t.querier.CreateAndRegisterWorker(t.Server.HTTPServer.Handler)
 }
@@ -380,6 +381,7 @@ func (t *App) initQueryFrontend() (services.Service, error) {
 	searchWSHandler := middleware.Wrap(queryFrontend.SearchWSHandler)
 	spanMetricsSummaryHandler := middleware.Wrap(queryFrontend.SpanMetricsSummaryHandler)
 	searchTagsHandler := middleware.Wrap(queryFrontend.SearchTagsHandler)
+	queryRangeHandler := middleware.Wrap(queryFrontend.QueryRangeHandler)
 
 	// register grpc server for queriers to connect to
 	frontend_v1pb.RegisterFrontendServer(t.Server.GRPC, t.frontend)
@@ -401,8 +403,8 @@ func (t *App) initQueryFrontend() (services.Service, error) {
 
 	// http metrics endpoints
 	t.Server.HTTP.Handle(addHTTPAPIPrefix(&t.cfg, api.PathSpanMetricsSummary), spanMetricsSummaryHandler)
-	// FIXME: check the handler
-	// t.Server.HTTP.Handle(addHTTPAPIPrefix(&t.cfg, api.PathSpanMetricsSelect), spanMetricsSummaryHandler)
+	t.Server.HTTP.Handle(addHTTPAPIPrefix(&t.cfg, api.PathMetricsQueryRange), queryRangeHandler)
+	t.Server.HTTP.Handle(api.PathPromQueryRange, queryRangeHandler)
 
 	// the query frontend needs to have knowledge of the blocks so it can shard search jobs
 	t.store.EnablePolling(context.Background(), nil)
