@@ -358,7 +358,7 @@ func (q *Querier) QueryRangeHandler(w http.ResponseWriter, r *http.Request) {
 		// // map values
 		for _, ts := range series.Samples {
 			promResult.Values = append(promResult.Values, []interface{}{
-				float64(ts.TimestampMs),                    // float for timestamp. assume it's seconds
+				float64(ts.TimestampMs / 1000.0),           // float for timestamp. assume it's seconds
 				strconv.FormatFloat(ts.Value, 'f', -1, 64), // making assumptions about the float format returned from prom
 			})
 

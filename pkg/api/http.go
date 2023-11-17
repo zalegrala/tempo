@@ -468,6 +468,8 @@ func ParseQueryRangeRequest(r *http.Request) (*tempopb.QueryRangeRequest, error)
 			return nil, fmt.Errorf("invalid step: %w", err)
 		}
 		req.Step = uint64(step)
+	} else {
+		req.Step = traceql.DefaultQueryRangeStep(uint64(start.UnixNano()), uint64(end.UnixNano()))
 	}
 
 	// metric := r.URL.Query().Get(urlParamMetric)
