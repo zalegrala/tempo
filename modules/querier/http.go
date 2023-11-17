@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -326,6 +327,19 @@ func (q *Querier) QueryRangeHandler(w http.ResponseWriter, r *http.Request) {
 			ResultType: "matrix",
 		},
 	}
+
+	// Sort series alphabetically so they are stable in the UI
+	sort.Slice(resp.Series, func(i, j int) bool {
+		a := resp.Series[i].Labels
+		b := resp.Series[j].Labels
+
+		for k := 0; k < len(a) && k < len(b); k++ {
+			if a[k].Value.GetStringValue() < b[k].Value.GetStringValue() {
+				return true
+			}
+		}
+		return false
+	})
 
 	for _, series := range resp.Series {
 		promResult := PromResult{
