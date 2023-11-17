@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/prometheus/prometheus/model/labels"
+
 	"github.com/grafana/tempo/pkg/tempopb"
 	"github.com/grafana/tempo/pkg/util"
 )
@@ -55,21 +57,22 @@ func IntervalOf(ts, start, end, step uint64) int {
 	return int((ts - start) / step)
 }
 
-type Label struct {
-	Key   Attribute
-	Value Static
-}
+//type Label struct {
+//	Key   Attribute
+//	Value Static
+//}
 
-const maxGroupBys = 5 // TODO - Delete me
-type LabelSet [maxGroupBys]Label
+//const maxGroupBys = 5 // TODO - Delete me
+//type LabelSet [maxGroupBys]Label
 
 type TimeSeries struct {
-	Labels LabelSet
+	//Labels LabelSet
+	Labels labels.Labels
 	Values []float64
 }
 
 // TODO - Make an analog of me in tempopb proto for over-the-wire transmission
-type SeriesSet map[LabelSet]TimeSeries
+type SeriesSet map[string]TimeSeries
 
 // VectorAggregator turns a vector of spans into a single numeric scalar
 type VectorAggregator interface {
@@ -146,12 +149,10 @@ func NewStepAggregator(start, end, step uint64, innerAgg func() VectorAggregator
 }
 
 func (s *StepAggregator) Observe(span Span) {
-	st := span.StartTimeUnixNanos()
-	if st < s.start || st >= s.end {
-		// Out of bounds, maybe this needs to be checked higher up
+	interval := IntervalOf(span.StartTimeUnixNanos(), s.start, s.end, s.step)
+	if interval == -1 {
 		return
 	}
-	interval := (st - s.start) / s.step
 	s.vectors[interval].Observe(span)
 }
 
@@ -163,22 +164,38 @@ func (s *StepAggregator) Samples() []float64 {
 	return ss
 }
 
+type group struct {
+	labels labels.Labels
+	agg    RangeAggregator
+}
+
 type GroupingAggregator struct {
-	series    map[LabelSet]RangeAggregator
+	series    map[string]*group
 	by        []Attribute   // Original attributes: .foo
 	byLookups [][]Attribute // Lookups: span.foo resource.foo
 	innerAgg  func() RangeAggregator
+	buf       labels.Labels
 }
 
 var _ SpanAggregator = (*GroupingAggregator)(nil)
 
-func NewGroupingAggregator(innerAgg func() RangeAggregator, by []Attribute) SpanAggregator {
+func NewGroupingAggregator(aggName string, innerAgg func() RangeAggregator, by []Attribute) SpanAggregator {
 	if len(by) == 0 {
 		return &UngroupedAggregator{
+			name:     aggName,
 			innerAgg: innerAgg(),
 		}
 	}
 
+	// Label buffer.
+	// Each by group + metric name
+	buf := make(labels.Labels, 1+len(by))
+	buf[0].Name = labels.MetricName
+	buf[0].Value = aggName
+
+	// Precompute several things about the grouping
+	// Direct lookups for unscoped attributes (.foo becomes span.foo, resource.foo)
+	// Assign the label names
 	lookups := make([][]Attribute, len(by))
 	for i, attr := range by {
 		if attr.Intrinsic == IntrinsicNone && attr.Scope == AttributeScopeNone {
@@ -191,39 +208,45 @@ func NewGroupingAggregator(innerAgg func() RangeAggregator, by []Attribute) Span
 		} else {
 			lookups[i] = []Attribute{attr}
 		}
+
+		buf[i+1].Name = attr.String()
 	}
 
 	return &GroupingAggregator{
-		series:    map[LabelSet]RangeAggregator{},
+		series:    map[string]*group{},
 		by:        by,
 		byLookups: lookups,
 		innerAgg:  innerAgg,
+		buf:       buf,
 	}
 }
 
 func (g *GroupingAggregator) Observe(span Span) {
-	labels := LabelSet{}
-	for i, k := range g.by {
-		labels[i].Key = k
-		labels[i].Value = lookup(g.byLookups[i], span.Attributes())
+	for i, lookups := range g.byLookups {
+		g.buf[i+1].Value = lookup(lookups, span.Attributes()).EncodeToString(false)
 	}
 
-	series, ok := g.series[labels]
+	s := g.buf.String()
+
+	series, ok := g.series[s]
 	if !ok {
-		series = g.innerAgg()
-		g.series[labels] = series
+		series = &group{
+			labels: g.buf.Copy(),
+			agg:    g.innerAgg(),
+		}
+		g.series[s] = series
 	}
 
-	series.Observe(span)
+	series.agg.Observe(span)
 }
 
 func (g *GroupingAggregator) Series() SeriesSet {
 	ss := SeriesSet{}
 
-	for k, v := range g.series {
-		ss[k] = TimeSeries{
-			Labels: k,
-			Values: v.Samples(),
+	for s, group := range g.series {
+		ss[s] = TimeSeries{
+			Labels: group.labels,
+			Values: group.agg.Samples(),
 		}
 	}
 
@@ -232,6 +255,7 @@ func (g *GroupingAggregator) Series() SeriesSet {
 
 // UngroupedAggregator builds a single series with no labels. e.g. {} | rate()
 type UngroupedAggregator struct {
+	name     string
 	innerAgg RangeAggregator
 }
 
@@ -242,9 +266,9 @@ func (u *UngroupedAggregator) Observe(span Span) {
 }
 
 func (u *UngroupedAggregator) Series() SeriesSet {
-	l := LabelSet{}
+	l := labels.FromStrings(labels.MetricName, u.name)
 	return SeriesSet{
-		l: {
+		l.String(): {
 			Labels: l,
 			Values: u.innerAgg.Samples(),
 		},

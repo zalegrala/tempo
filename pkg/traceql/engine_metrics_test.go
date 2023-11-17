@@ -124,13 +124,6 @@ func TestCompileMetricsQueryRange(t *testing.T) {
 			q:           "{}",
 			expectedErr: fmt.Errorf("not a metrics query"),
 		},
-		"notsupported": {
-			start:       1,
-			end:         2,
-			step:        3,
-			q:           "{} | rate() by (.a,.b,.c,.d,.e,.f)",
-			expectedErr: fmt.Errorf("compiling query: metrics group by 6 values not yet supported"),
-		},
 		"ok": {
 			start: 1,
 			end:   2,

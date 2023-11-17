@@ -776,7 +776,7 @@ func (a *MetricsAggregate) init(q *tempopb.QueryRangeRequest) {
 		innerAgg = func() VectorAggregator { return NewRateAggregator(1.0 / time.Duration(q.Step).Seconds()) }
 	}
 
-	a.agg = NewGroupingAggregator(func() RangeAggregator {
+	a.agg = NewGroupingAggregator(a.op.String(), func() RangeAggregator {
 		return NewStepAggregator(q.Start, q.End, q.Step, innerAgg)
 	}, a.by)
 }
@@ -797,9 +797,9 @@ func (a *MetricsAggregate) validate() error {
 		return newUnsupportedError(fmt.Sprintf("metrics aggregate operation (%v)", a.op))
 	}
 
-	if len(a.by) > maxGroupBys {
-		return newUnsupportedError(fmt.Sprintf("metrics group by %v values", len(a.by)))
-	}
+	//if len(a.by) > maxGroupBys {
+	//	return newUnsupportedError(fmt.Sprintf("metrics group by %v values", len(a.by)))
+	//}
 
 	return nil
 }

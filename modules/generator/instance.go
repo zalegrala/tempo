@@ -426,8 +426,8 @@ func (i *instance) queryRangeTraceQLToProto(set traceql.SeriesSet, req *tempopb.
 		for _, label := range s.Labels {
 			labels = append(labels,
 				commonv1proto.KeyValue{
-					Key:   label.Key.String(),
-					Value: label.Value.AsAnyValue(),
+					Key:   label.Name,
+					Value: traceql.NewStaticString(label.Value).AsAnyValue(),
 				},
 			)
 		}
