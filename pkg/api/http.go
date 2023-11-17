@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"github.com/go-logfmt/logfmt"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"github.com/prometheus/common/model"
 
 	"github.com/grafana/tempo/pkg/tempopb"
 	"github.com/grafana/tempo/pkg/traceql"
@@ -93,6 +95,7 @@ const (
 
 	defaultLimit           = 20
 	defaultSpansPerSpanSet = 3
+	defaultSince           = 1 * time.Hour
 )
 
 func ParseTraceID(r *http.Request) ([]byte, error) {
@@ -454,21 +457,10 @@ func ParseQueryRangeRequest(r *http.Request) (*tempopb.QueryRangeRequest, error)
 	}
 	// fmt.Println(string(body))
 
-	if s, ok := extractQueryParam(r, urlParamStart); ok {
-		start, err := strconv.ParseInt(s, 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid start: %w", err)
-		}
-		req.Start = uint64(start)
-	}
+	start, end, _ := bounds(r)
 
-	if s, ok := extractQueryParam(r, urlParamEnd); ok {
-		end, err := strconv.ParseInt(s, 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid end: %w", err)
-		}
-		req.End = uint64(end)
-	}
+	req.Start = uint64(start.UnixNano())
+	req.End = uint64(end.UnixNano())
 
 	if s, ok := extractQueryParam(r, urlParamStep); ok {
 		step, err := strconv.ParseInt(s, 10, 64)
@@ -478,7 +470,103 @@ func ParseQueryRangeRequest(r *http.Request) (*tempopb.QueryRangeRequest, error)
 		req.Step = uint64(step)
 	}
 
+	// metric := r.URL.Query().Get(urlParamMetric)
+	// switch {
+	// case metric == "p99":
+	// 	req.Metric = tempopb.SpanMetricsMegaSelectRequest_P99
+	// case metric == "p90":
+	// 	req.Metric = tempopb.SpanMetricsMegaSelectRequest_P90
+	// case metric == "p50":
+	// 	req.Metric = tempopb.SpanMetricsMegaSelectRequest_P50
+	// case metric == "errorrate":
+	// 	req.Metric = tempopb.SpanMetricsMegaSelectRequest_ERRORRATE
+	// default:
+	// 	req.Metric = tempopb.SpanMetricsMegaSelectRequest_P90
+	// 	// return nil, fmt.Errorf("invalid metric: %s", metric)
+	// }
+
 	return req, nil
+}
+
+func bounds(r *http.Request) (time.Time, time.Time, error) {
+	var (
+		now   = time.Now()
+		start string
+		end   string
+		since string
+	)
+
+	if x, ok := extractQueryParam(r, urlParamStart); ok {
+		start = x
+	}
+
+	if x, ok := extractQueryParam(r, urlParamEnd); ok {
+		end = x
+	}
+
+	// if x, ok := extractQueryParam(r, urlParamSince); ok {
+	// 	since = x
+	// }
+
+	return determineBounds(now, start, end, since)
+}
+
+func determineBounds(now time.Time, startString, endString, sinceString string) (time.Time, time.Time, error) {
+	since := defaultSince
+	if sinceString != "" {
+		d, err := model.ParseDuration(sinceString)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("could not parse 'since' parameter: %w", err)
+		}
+		since = time.Duration(d)
+	}
+
+	end, err := parseTimestamp(endString, now)
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("could not parse 'end' parameter: %w", err)
+	}
+
+	// endOrNow is used to apply a default for the start time or an offset if 'since' is provided.
+	// we want to use the 'end' time so long as it's not in the future as this should provide
+	// a more intuitive experience when end time is in the future.
+	endOrNow := end
+	if end.After(now) {
+		endOrNow = now
+	}
+
+	start, err := parseTimestamp(startString, endOrNow.Add(-since))
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("could not parse 'start' parameter: %w", err)
+	}
+
+	return start, end, nil
+}
+
+// parseTimestamp parses a ns unix timestamp from a string
+// if the value is empty it returns a default value passed as second parameter
+func parseTimestamp(value string, def time.Time) (time.Time, error) {
+	if value == "" {
+		return def, nil
+	}
+
+	if strings.Contains(value, ".") {
+		if t, err := strconv.ParseFloat(value, 64); err == nil {
+			s, ns := math.Modf(t)
+			ns = math.Round(ns*1000) / 1000
+			return time.Unix(int64(s), int64(ns*float64(time.Second))), nil
+		}
+	}
+	nanos, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		if ts, err := time.Parse(time.RFC3339Nano, value); err == nil {
+			return ts, nil
+		}
+		return time.Time{}, err
+	}
+	if len(value) <= 10 {
+		return time.Unix(nanos, 0), nil
+	}
+	return time.Unix(0, nanos), nil
 }
 
 // BuildSearchRequest takes a tempopb.SearchRequest and populates the passed http.Request

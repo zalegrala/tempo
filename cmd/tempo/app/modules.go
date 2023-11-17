@@ -346,6 +346,11 @@ func (t *App) initQuerier() (services.Service, error) {
 	spanMetricsSummaryHandler := t.HTTPAuthMiddleware.Wrap(http.HandlerFunc(t.querier.SpanMetricsSummaryHandler))
 	t.Server.HTTP.Handle(path.Join(api.PathPrefixQuerier, addHTTPAPIPrefix(&t.cfg, api.PathSpanMetricsSummary)), spanMetricsSummaryHandler)
 
+	queryRangeHandler := t.HTTPAuthMiddleware.Wrap(http.HandlerFunc(t.querier.QueryRangeHandler))
+	t.Server.HTTP.Handle(path.Join(api.PathPrefixQuerier, addHTTPAPIPrefix(&t.cfg, api.PathMetricsQueryRange)), queryRangeHandler)
+	// To support the prometheus query_range endpoint, we need to register the handler at the root path.
+	t.Server.HTTP.Handle("/api/v1/query_range", queryRangeHandler)
+
 	return t.querier, t.querier.CreateAndRegisterWorker(t.Server.HTTPServer.Handler)
 }
 
@@ -396,6 +401,8 @@ func (t *App) initQueryFrontend() (services.Service, error) {
 
 	// http metrics endpoints
 	t.Server.HTTP.Handle(addHTTPAPIPrefix(&t.cfg, api.PathSpanMetricsSummary), spanMetricsSummaryHandler)
+	// FIXME: check the handler
+	// t.Server.HTTP.Handle(addHTTPAPIPrefix(&t.cfg, api.PathSpanMetricsSelect), spanMetricsSummaryHandler)
 
 	// the query frontend needs to have knowledge of the blocks so it can shard search jobs
 	t.store.EnablePolling(context.Background(), nil)

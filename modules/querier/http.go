@@ -2,18 +2,21 @@ package querier
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/golang/protobuf/jsonpb" //nolint:all //deprecated
 	"github.com/golang/protobuf/proto"  //nolint:all //ProtoReflect
+	"github.com/opentracing/opentracing-go"
+	ot_log "github.com/opentracing/opentracing-go/log"
+
 	"github.com/grafana/tempo/pkg/api"
 	"github.com/grafana/tempo/pkg/model/trace"
 	"github.com/grafana/tempo/pkg/tempopb"
-	"github.com/opentracing/opentracing-go"
-	ot_log "github.com/opentracing/opentracing-go/log"
 )
 
 const (
@@ -296,6 +299,98 @@ func (q *Querier) SpanMetricsSummaryHandler(w http.ResponseWriter, r *http.Reque
 	w.Header().Set(api.HeaderContentType, api.HeaderAcceptJSON)
 }
 
+func (q *Querier) QueryRangeHandler(w http.ResponseWriter, r *http.Request) {
+	// Enforce the query timeout while querying backends
+	ctx, cancel := context.WithDeadline(r.Context(), time.Now().Add(q.cfg.Search.QueryTimeout))
+	defer cancel()
+
+	span, ctx := opentracing.StartSpanFromContext(ctx, "Querier.SpanMetricsMegaSelectHandler")
+	defer span.Finish()
+
+	req, err := api.ParseQueryRangeRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resp, err := q.QueryRange(ctx, req)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	// TODO: consider custom marshaller
+	promResp := PromResponse{
+		Status: "success",
+		Data: PromData{
+			ResultType: "matrix",
+		},
+	}
+
+	for _, series := range resp.Series {
+		promResult := PromResult{
+			Metric: map[string]string{},
+		}
+
+		for _, label := range series.Labels {
+
+			v := label.Value.GetStringValue()
+			if v == "" || v == "nill" {
+				continue
+			}
+
+			promResult.Metric[label.Key] = label.Value.GetStringValue()
+		}
+
+		// map labels
+		// if result.LabelName == "" {
+		// 	promResult.Metric["__name__"] = "mega-summary"
+		// } else {
+		// 	promResult.Metric["__name__"] = result.LabelName   // "not-mega-summary"
+		// 	promResult.Metric["__value__"] = result.LabelValue // "not-mega-summary"
+		// }
+		//
+		// baseSeed := fnv1a.HashString64(result.LabelValue)
+		//
+		promResult.Values = make([]interface{}, 0, len(series.Samples))
+		// promResult.Exemplars = make([]interface{}, 0, len(result.Ts))
+		//
+		// // map values
+		for _, ts := range series.Samples {
+			promResult.Values = append(promResult.Values, []interface{}{
+				float64(ts.TimestampMs),                    // float for timestamp. assume it's seconds
+				strconv.FormatFloat(ts.Value, 'f', -1, 64), // making assumptions about the float format returned from prom
+			})
+
+			// 	wangoZeeTango := rand.New(rand.NewSource(int64(baseSeed + uint64(ts.Time))))
+			// 	if len(ts.ExemplarTraceID) > 0 && (wangoZeeTango.Int31n(20) == 0 || time.Duration(ts.ExemplarDuration).Seconds() > 2) {
+			// 		promResult.Exemplars = append(promResult.Exemplars, []interface{}{
+			// 			float64(ts.Time), // float for timestamp. assume it's seconds
+			// 			strconv.FormatFloat(time.Duration(ts.ExemplarDuration).Seconds(), 'f', -1, 64),
+			// 			util.TraceIDToHexString(ts.ExemplarTraceID),
+			// 		})
+			// 	}
+		}
+
+		promResp.Data.Result = append(promResp.Data.Result, promResult)
+	}
+
+	jsBytes, err := json.Marshal(promResp)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	_, err = w.Write(jsBytes)
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set(api.HeaderContentType, api.HeaderAcceptJSON)
+}
+
 func handleError(w http.ResponseWriter, err error) {
 	if err == nil {
 		return
@@ -314,4 +409,21 @@ func handleError(w http.ResponseWriter, err error) {
 	}
 
 	http.Error(w, err.Error(), http.StatusInternalServerError)
+}
+
+// objects to mock  the prometheus http response
+type PromResponse struct {
+	Status string   `json:"status"`
+	Data   PromData `json:"data"`
+}
+
+type PromData struct {
+	ResultType string       `json:"resultType"`
+	Result     []PromResult `json:"result"`
+}
+
+type PromResult struct {
+	Metric    map[string]string `json:"metric"`
+	Values    []interface{}     `json:"values"`    // first entry is timestamp (float), second is value (string)
+	Exemplars []interface{}     `json:"exemplars"` // first entry is timestamp (float), second is duration (float seconds), third is traceID (string)
 }
