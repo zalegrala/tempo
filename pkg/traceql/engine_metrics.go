@@ -17,8 +17,8 @@ func DefaultQueryRangeStep(start, end uint64) uint64 {
 	delta := time.Duration(end - start)
 
 	// Try to get this many data points
-	// Our baseline is is 1 hour @ 30s intervals
-	baseline := delta / 120
+	// Our baseline is is 1 hour @ 15s intervals
+	baseline := delta / 240
 
 	// Round down in intervals of 5s
 	interval := baseline / (5 * time.Second) * (5 * time.Second)
