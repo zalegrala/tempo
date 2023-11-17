@@ -329,7 +329,7 @@ func (q *Querier) QueryRangeHandler(w http.ResponseWriter, r *http.Request) {
 
 		if err != nil {
 			promResp.Status = "error"
-			promResp.ErrorType = "internal_error"
+			promResp.ErrorType = "bad_data"
 			promResp.Error = err.Error()
 			span.SetTag("error", err.Error())
 		}
