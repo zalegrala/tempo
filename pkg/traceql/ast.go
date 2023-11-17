@@ -797,9 +797,9 @@ func (a *MetricsAggregate) validate() error {
 		return newUnsupportedError(fmt.Sprintf("metrics aggregate operation (%v)", a.op))
 	}
 
-	//if len(a.by) > maxGroupBys {
-	//	return newUnsupportedError(fmt.Sprintf("metrics group by %v values", len(a.by)))
-	//}
+	if len(a.by) > maxGroupBys {
+		return newUnsupportedError(fmt.Sprintf("metrics group by %v values", len(a.by)))
+	}
 
 	return nil
 }

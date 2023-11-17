@@ -57,13 +57,8 @@ func IntervalOf(ts, start, end, step uint64) int {
 	return int((ts - start) / step)
 }
 
-//type Label struct {
-//	Key   Attribute
-//	Value Static
-//}
-
-//const maxGroupBys = 5 // TODO - Delete me
-//type LabelSet [maxGroupBys]Label
+const maxGroupBys = 5 // TODO - Delete me
+type FastValues [maxGroupBys]Static
 
 type TimeSeries struct {
 	//Labels LabelSet
@@ -164,18 +159,16 @@ func (s *StepAggregator) Samples() []float64 {
 	return ss
 }
 
-type group struct {
-	labels labels.Labels
-	agg    RangeAggregator
-}
-
 type GroupingAggregator struct {
-	series    map[string]*group
+	// Config
 	by        []Attribute   // Original attributes: .foo
 	byLookups [][]Attribute // Lookups: span.foo resource.foo
-	byNames   []string
 	innerAgg  func() RangeAggregator
-	buf       labels.Labels
+	name      string
+
+	// Data
+	series map[FastValues]RangeAggregator
+	buf    FastValues
 }
 
 var _ SpanAggregator = (*GroupingAggregator)(nil)
@@ -188,20 +181,8 @@ func NewGroupingAggregator(aggName string, innerAgg func() RangeAggregator, by [
 		}
 	}
 
-	// Label buffer.
-	// Each by group + metric name
-	buf := make(labels.Labels, 1+len(by))
-	buf[0].Name = labels.MetricName
-	buf[0].Value = aggName
-
-	// Precompute several things about the grouping
-	// Direct lookups for unscoped attributes (.foo becomes span.foo, resource.foo)
-	// Assign the label names
 	lookups := make([][]Attribute, len(by))
-	names := make([]string, len(by))
 	for i, attr := range by {
-		names[i] = attr.String()
-
 		if attr.Intrinsic == IntrinsicNone && attr.Scope == AttributeScopeNone {
 			// Unscoped attribute. Also check span-level, then resource-level.
 			lookups[i] = []Attribute{
@@ -215,55 +196,52 @@ func NewGroupingAggregator(aggName string, innerAgg func() RangeAggregator, by [
 	}
 
 	return &GroupingAggregator{
-		series:    map[string]*group{},
+		series:    map[FastValues]RangeAggregator{},
 		by:        by,
 		byLookups: lookups,
-		byNames:   names,
+		name:      aggName,
 		innerAgg:  innerAgg,
-		buf:       buf,
 	}
 }
 
 func (g *GroupingAggregator) Observe(span Span) {
-	// Labels without nils
-	// TODO - profile this since it must happen for every span
 
-	// Reset buffer but keep original metric name
-	count := 1
-
+	// Get grouping values
 	for i, lookups := range g.byLookups {
-		v := lookup(lookups, span.Attributes())
-		if v.Type == TypeNil {
-			continue
-		}
-
-		g.buf[count].Name = g.byNames[i]
-		g.buf[count].Value = v.EncodeToString(false)
-		count++
+		g.buf[i] = lookup(lookups, span.Attributes())
 	}
 
-	buf := g.buf[:count]
-	s := buf.String()
-
-	series, ok := g.series[s]
+	agg, ok := g.series[g.buf]
 	if !ok {
-		series = &group{
-			labels: buf.Copy(),
-			agg:    g.innerAgg(),
-		}
-		g.series[s] = series
+		agg = g.innerAgg()
+		g.series[g.buf] = agg
 	}
 
-	series.agg.Observe(span)
+	agg.Observe(span)
+}
+
+// labelsFor gives the final labels for the series. Slower and can't be on the hot path.
+func (g *GroupingAggregator) labelsFor(vals FastValues) labels.Labels {
+	b := labels.NewBuilder(nil)
+	b.Set(labels.MetricName, g.name)
+
+	for i, v := range vals {
+		if v.Type != TypeNil {
+			b.Set(g.by[i].String(), v.EncodeToString(false))
+		}
+	}
+	return b.Labels()
 }
 
 func (g *GroupingAggregator) Series() SeriesSet {
 	ss := SeriesSet{}
 
-	for s, group := range g.series {
-		ss[s] = TimeSeries{
-			Labels: group.labels,
-			Values: group.agg.Samples(),
+	for vals, agg := range g.series {
+		l := g.labelsFor(vals)
+
+		ss[l.String()] = TimeSeries{
+			Labels: l,
+			Values: agg.Samples(),
 		}
 	}
 
