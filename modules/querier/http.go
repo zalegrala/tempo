@@ -335,6 +335,8 @@ func (q *Querier) QueryRangeHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	promResp.Data = PromData{ResultType: "matrix"}
+
 	defer func() {
 		var (
 			jsBytes []byte
@@ -374,7 +376,6 @@ func (q *Querier) QueryRangeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	promResp.Status = "success"
-	promResp.Data = PromData{ResultType: "matrix"}
 
 	// Sort series alphabetically so they are stable in the UI
 	sort.Slice(resp.Series, func(i, j int) bool {
