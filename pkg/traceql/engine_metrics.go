@@ -173,6 +173,7 @@ type GroupingAggregator struct {
 	series    map[string]*group
 	by        []Attribute   // Original attributes: .foo
 	byLookups [][]Attribute // Lookups: span.foo resource.foo
+	byNames   []string
 	innerAgg  func() RangeAggregator
 	buf       labels.Labels
 }
@@ -197,7 +198,10 @@ func NewGroupingAggregator(aggName string, innerAgg func() RangeAggregator, by [
 	// Direct lookups for unscoped attributes (.foo becomes span.foo, resource.foo)
 	// Assign the label names
 	lookups := make([][]Attribute, len(by))
+	names := make([]string, len(by))
 	for i, attr := range by {
+		names[i] = attr.String()
+
 		if attr.Intrinsic == IntrinsicNone && attr.Scope == AttributeScopeNone {
 			// Unscoped attribute. Also check span-level, then resource-level.
 			lookups[i] = []Attribute{
@@ -208,30 +212,43 @@ func NewGroupingAggregator(aggName string, innerAgg func() RangeAggregator, by [
 		} else {
 			lookups[i] = []Attribute{attr}
 		}
-
-		buf[i+1].Name = attr.String()
 	}
 
 	return &GroupingAggregator{
 		series:    map[string]*group{},
 		by:        by,
 		byLookups: lookups,
+		byNames:   names,
 		innerAgg:  innerAgg,
 		buf:       buf,
 	}
 }
 
 func (g *GroupingAggregator) Observe(span Span) {
+	// Labels without nils
+	// TODO - profile this since it must happen for every span
+
+	// Reset buffer but keep original metric name
+	count := 1
+
 	for i, lookups := range g.byLookups {
-		g.buf[i+1].Value = lookup(lookups, span.Attributes()).EncodeToString(false)
+		v := lookup(lookups, span.Attributes())
+		if v.Type == TypeNil {
+			continue
+		}
+
+		g.buf[count].Name = g.byNames[i]
+		g.buf[count].Value = v.EncodeToString(false)
+		count++
 	}
 
-	s := g.buf.String()
+	buf := g.buf[:count]
+	s := buf.String()
 
 	series, ok := g.series[s]
 	if !ok {
 		series = &group{
-			labels: g.buf.Copy(),
+			labels: buf.Copy(),
 			agg:    g.innerAgg(),
 		}
 		g.series[s] = series
