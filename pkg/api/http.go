@@ -462,30 +462,12 @@ func ParseQueryRangeRequest(r *http.Request) (*tempopb.QueryRangeRequest, error)
 	req.Start = uint64(start.UnixNano())
 	req.End = uint64(end.UnixNano())
 
-	if s, ok := extractQueryParam(r, urlParamStep); ok {
-		step, err := strconv.ParseInt(s, 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid step: %w", err)
-		}
-		req.Step = uint64(step)
-	} else {
+	step, err := step(r, start, end)
+	if err != nil {
 		req.Step = traceql.DefaultQueryRangeStep(uint64(start.UnixNano()), uint64(end.UnixNano()))
+	} else {
+		req.Step = uint64(step)
 	}
-
-	// metric := r.URL.Query().Get(urlParamMetric)
-	// switch {
-	// case metric == "p99":
-	// 	req.Metric = tempopb.SpanMetricsMegaSelectRequest_P99
-	// case metric == "p90":
-	// 	req.Metric = tempopb.SpanMetricsMegaSelectRequest_P90
-	// case metric == "p50":
-	// 	req.Metric = tempopb.SpanMetricsMegaSelectRequest_P50
-	// case metric == "errorrate":
-	// 	req.Metric = tempopb.SpanMetricsMegaSelectRequest_ERRORRATE
-	// default:
-	// 	req.Metric = tempopb.SpanMetricsMegaSelectRequest_P90
-	// 	// return nil, fmt.Errorf("invalid metric: %s", metric)
-	// }
 
 	return req, nil
 }
@@ -493,22 +475,10 @@ func ParseQueryRangeRequest(r *http.Request) (*tempopb.QueryRangeRequest, error)
 func bounds(r *http.Request) (time.Time, time.Time, error) {
 	var (
 		now   = time.Now()
-		start string
-		end   string
-		since string
+		start = r.Form.Get("start")
+		end   = r.Form.Get("end")
+		since = r.Form.Get("since")
 	)
-
-	if x, ok := extractQueryParam(r, urlParamStart); ok {
-		start = x
-	}
-
-	if x, ok := extractQueryParam(r, urlParamEnd); ok {
-		end = x
-	}
-
-	// if x, ok := extractQueryParam(r, urlParamSince); ok {
-	// 	since = x
-	// }
 
 	return determineBounds(now, start, end, since)
 }
@@ -569,6 +539,34 @@ func parseTimestamp(value string, def time.Time) (time.Time, error) {
 		return time.Unix(nanos, 0), nil
 	}
 	return time.Unix(0, nanos), nil
+}
+
+func step(r *http.Request, start, end time.Time) (time.Duration, error) {
+	value := r.Form.Get(urlParamStep)
+	if value == "" {
+		return time.Duration(defaultQueryRangeStep(start, end)) * time.Second, nil
+	}
+	return parseSecondsOrDuration(value)
+}
+
+// defaultQueryRangeStep returns the default step used in the query range API,
+// which is dynamically calculated based on the time range
+func defaultQueryRangeStep(start time.Time, end time.Time) int {
+	return int(math.Max(math.Floor(end.Sub(start).Seconds()/250), 1))
+}
+
+func parseSecondsOrDuration(value string) (time.Duration, error) {
+	if d, err := strconv.ParseFloat(value, 64); err == nil {
+		ts := d * float64(time.Second)
+		if ts > float64(math.MaxInt64) || ts < float64(math.MinInt64) {
+			return 0, fmt.Errorf("cannot parse %q to a valid duration. It overflows int64", value)
+		}
+		return time.Duration(ts), nil
+	}
+	if d, err := model.ParseDuration(value); err == nil {
+		return time.Duration(d), nil
+	}
+	return 0, fmt.Errorf("cannot parse %q to a valid duration", value)
 }
 
 // BuildSearchRequest takes a tempopb.SearchRequest and populates the passed http.Request

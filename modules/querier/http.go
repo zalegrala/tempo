@@ -301,6 +301,12 @@ func (q *Querier) SpanMetricsSummaryHandler(w http.ResponseWriter, r *http.Reque
 }
 
 func (q *Querier) QueryRangeHandler(w http.ResponseWriter, r *http.Request) {
+	var (
+		err      error
+		resp     *tempopb.QueryRangeResponse
+		promResp PromResponse
+	)
+
 	// Enforce the query timeout while querying backends
 	ctx, cancel := context.WithDeadline(r.Context(), time.Now().Add(q.cfg.Search.QueryTimeout))
 	defer cancel()
@@ -308,25 +314,67 @@ func (q *Querier) QueryRangeHandler(w http.ResponseWriter, r *http.Request) {
 	span, ctx := opentracing.StartSpanFromContext(ctx, "Querier.SpanMetricsMegaSelectHandler")
 	defer span.Finish()
 
+	errHandler := func(ctx context.Context, span opentracing.Span, err error) {
+		if errors.Is(err, context.Canceled) {
+			// todo: context is also canceled when we hit the query timeout. research what the behavior is
+			// ignore this error. we regularly cancel context once queries are complete
+			span.SetTag("error", err.Error())
+			return
+		}
+
+		if ctx.Err() != nil {
+			span.SetTag("error", ctx.Err())
+			return
+		}
+
+		if err != nil {
+			promResp.Status = "error"
+			promResp.ErrorType = "internal_error"
+			promResp.Error = err.Error()
+			span.SetTag("error", err.Error())
+		}
+	}
+
+	defer func() {
+		var (
+			jsBytes []byte
+			funcErr error
+		)
+
+		errHandler(ctx, span, err)
+
+		jsBytes, funcErr = json.Marshal(promResp)
+		if funcErr != nil {
+			errHandler(ctx, span, funcErr)
+			http.Error(w, funcErr.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		_, funcErr = w.Write(jsBytes)
+		if funcErr != nil {
+			errHandler(ctx, span, funcErr)
+			http.Error(w, funcErr.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set(api.HeaderContentType, api.HeaderAcceptJSON)
+	}()
+
 	req, err := api.ParseQueryRangeRequest(r)
 	if err != nil {
+		errHandler(ctx, span, err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	resp, err := q.QueryRange(ctx, req)
+	resp, err = q.QueryRange(ctx, req)
 	if err != nil {
-		handleError(w, err)
+		errHandler(ctx, span, err)
 		return
 	}
 
-	// TODO: consider custom marshaller
-	promResp := PromResponse{
-		Status: "success",
-		Data: PromData{
-			ResultType: "matrix",
-		},
-	}
+	promResp.Status = "success"
+	promResp.Data = PromData{ResultType: "matrix"}
 
 	// Sort series alphabetically so they are stable in the UI
 	sort.Slice(resp.Series, func(i, j int) bool {
@@ -347,7 +395,6 @@ func (q *Querier) QueryRangeHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		for _, label := range series.Labels {
-
 			v := label.Value.GetStringValue()
 			if v == "" || v == "nill" {
 				continue
@@ -356,53 +403,16 @@ func (q *Querier) QueryRangeHandler(w http.ResponseWriter, r *http.Request) {
 			promResult.Metric[label.Key] = label.Value.GetStringValue()
 		}
 
-		// map labels
-		// if result.LabelName == "" {
-		// 	promResult.Metric["__name__"] = "mega-summary"
-		// } else {
-		// 	promResult.Metric["__name__"] = result.LabelName   // "not-mega-summary"
-		// 	promResult.Metric["__value__"] = result.LabelValue // "not-mega-summary"
-		// }
-		//
-		// baseSeed := fnv1a.HashString64(result.LabelValue)
-		//
 		promResult.Values = make([]interface{}, 0, len(series.Samples))
-		// promResult.Exemplars = make([]interface{}, 0, len(result.Ts))
-		//
-		// // map values
 		for _, ts := range series.Samples {
 			promResult.Values = append(promResult.Values, []interface{}{
 				float64(ts.TimestampMs / 1000.0),           // float for timestamp. assume it's seconds
 				strconv.FormatFloat(ts.Value, 'f', -1, 64), // making assumptions about the float format returned from prom
 			})
-
-			// 	wangoZeeTango := rand.New(rand.NewSource(int64(baseSeed + uint64(ts.Time))))
-			// 	if len(ts.ExemplarTraceID) > 0 && (wangoZeeTango.Int31n(20) == 0 || time.Duration(ts.ExemplarDuration).Seconds() > 2) {
-			// 		promResult.Exemplars = append(promResult.Exemplars, []interface{}{
-			// 			float64(ts.Time), // float for timestamp. assume it's seconds
-			// 			strconv.FormatFloat(time.Duration(ts.ExemplarDuration).Seconds(), 'f', -1, 64),
-			// 			util.TraceIDToHexString(ts.ExemplarTraceID),
-			// 		})
-			// 	}
 		}
 
 		promResp.Data.Result = append(promResp.Data.Result, promResult)
 	}
-
-	jsBytes, err := json.Marshal(promResp)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	_, err = w.Write(jsBytes)
-
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set(api.HeaderContentType, api.HeaderAcceptJSON)
 }
 
 func handleError(w http.ResponseWriter, err error) {
@@ -427,8 +437,10 @@ func handleError(w http.ResponseWriter, err error) {
 
 // objects to mock  the prometheus http response
 type PromResponse struct {
-	Status string   `json:"status"`
-	Data   PromData `json:"data"`
+	Status    string   `json:"status"`
+	Data      PromData `json:"data"`
+	ErrorType string   `json:"errorType,omitempty"`
+	Error     string   `json:"error,omitempty"`
 }
 
 type PromData struct {
