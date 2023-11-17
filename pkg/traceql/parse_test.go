@@ -38,6 +38,7 @@ func TestPipelineErrors(t *testing.T) {
 		in  string
 		err error
 	}{
+		{in: "", err: newParseError("syntax error: unexpected $end", 0, 0)},
 		{in: "{ .a } | { .b", err: newParseError("syntax error: unexpected $end", 1, 14)},
 		{in: "{ .a | .b }", err: newParseError("syntax error: unexpected |", 1, 6)},
 		{in: "({ .a } | { .b }", err: newParseError("syntax error: unexpected $end, expecting ) or |", 1, 17)},

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"net/http"
 	"net/url"
@@ -16,6 +15,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/prometheus/common/model"
+
+	"github.com/grafana/dskit/httpgrpc"
 
 	"github.com/grafana/tempo/pkg/tempopb"
 	"github.com/grafana/tempo/pkg/traceql"
@@ -36,6 +37,7 @@ const (
 	urlParamEnd             = "end"
 	urlParamSpansPerSpanSet = "spss"
 	urlParamStep            = "step"
+	urlParamSince           = "since"
 
 	// backend search (querier/serverless)
 	urlParamStartPage        = "startPage"
@@ -437,30 +439,13 @@ func ParseSpanMetricsSummaryRequest(r *http.Request) (*tempopb.SpanMetricsSummar
 func ParseQueryRangeRequest(r *http.Request) (*tempopb.QueryRangeRequest, error) {
 	req := &tempopb.QueryRangeRequest{}
 
-	query := r.URL.Query().Get(urlParamQuery)
-	req.Query = query
+	if err := r.ParseForm(); err != nil {
+		return nil, httpgrpc.Errorf(http.StatusBadRequest, err.Error())
+	}
 
-	// Prometheus params
-	if q2 := r.URL.Query().Get("query"); q2 != "" {
-		req.Query = q2
-	}
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		return nil, err
-	}
-	if len(body) > 0 {
-		v, err := url.ParseQuery(string(body))
-		if err != nil {
-			return nil, err
-		}
-		if q2 := v.Get("query"); q2 != "" {
-			req.Query = q2
-		}
-	}
-	// fmt.Println(string(body))
+	req.Query = r.Form.Get("query")
 
 	start, end, _ := bounds(r)
-
 	req.Start = uint64(start.UnixNano())
 	req.End = uint64(end.UnixNano())
 
@@ -477,9 +462,9 @@ func ParseQueryRangeRequest(r *http.Request) (*tempopb.QueryRangeRequest, error)
 func bounds(r *http.Request) (time.Time, time.Time, error) {
 	var (
 		now   = time.Now()
-		start = r.Form.Get("start")
-		end   = r.Form.Get("end")
-		since = r.Form.Get("since")
+		start = r.Form.Get(urlParamStart)
+		end   = r.Form.Get(urlParamEnd)
+		since = r.Form.Get(urlParamSince)
 	)
 
 	return determineBounds(now, start, end, since)
