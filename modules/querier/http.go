@@ -335,8 +335,6 @@ func (q *Querier) QueryRangeHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	promResp.Data = PromData{ResultType: "matrix"}
-
 	defer func() {
 		var (
 			jsBytes []byte
@@ -376,6 +374,7 @@ func (q *Querier) QueryRangeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	promResp.Status = "success"
+	promResp.Data = &PromData{ResultType: "matrix"}
 
 	// Sort series alphabetically so they are stable in the UI
 	sort.Slice(resp.Series, func(i, j int) bool {
@@ -438,10 +437,10 @@ func handleError(w http.ResponseWriter, err error) {
 
 // objects to mock  the prometheus http response
 type PromResponse struct {
-	Status    string   `json:"status"`
-	Data      PromData `json:"data"`
-	ErrorType string   `json:"errorType,omitempty"`
-	Error     string   `json:"error,omitempty"`
+	Status    string    `json:"status"`
+	Data      *PromData `json:"data,omitempty"`
+	ErrorType string    `json:"errorType,omitempty"`
+	Error     string    `json:"error,omitempty"`
 }
 
 type PromData struct {
