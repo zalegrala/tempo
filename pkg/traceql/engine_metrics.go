@@ -164,7 +164,6 @@ type GroupingAggregator struct {
 	by        []Attribute   // Original attributes: .foo
 	byLookups [][]Attribute // Lookups: span.foo resource.foo
 	innerAgg  func() RangeAggregator
-	name      string
 
 	// Data
 	series map[FastValues]RangeAggregator
@@ -199,7 +198,6 @@ func NewGroupingAggregator(aggName string, innerAgg func() RangeAggregator, by [
 		series:    map[FastValues]RangeAggregator{},
 		by:        by,
 		byLookups: lookups,
-		name:      aggName,
 		innerAgg:  innerAgg,
 	}
 }
@@ -221,9 +219,11 @@ func (g *GroupingAggregator) Observe(span Span) {
 }
 
 // labelsFor gives the final labels for the series. Slower and can't be on the hot path.
+// This is tweaked to match what prometheus does.  For grouped metrics we don't
+// include the metric name, just the group labels.
+// rate() by (x) => {x=a}, {x=b}, ...
 func (g *GroupingAggregator) labelsFor(vals FastValues) labels.Labels {
 	b := labels.NewBuilder(nil)
-	b.Set(labels.MetricName, g.name)
 
 	for i, v := range vals {
 		if v.Type != TypeNil {
@@ -260,6 +260,10 @@ func (u *UngroupedAggregator) Observe(span Span) {
 	u.innerAgg.Observe(span)
 }
 
+// Series output.
+// This is tweaked to match what prometheus does.  For ungrouped metrics we
+// fill in a placeholder metric name with the name of the aggregation.
+// rate() => {__name__=rate}
 func (u *UngroupedAggregator) Series() SeriesSet {
 	l := labels.FromStrings(labels.MetricName, u.name)
 	return SeriesSet{
@@ -353,8 +357,11 @@ func (e *Engine) CompileMetricsQueryRange(req *tempopb.QueryRangeRequest) (*Metr
 		}
 	}
 	// (1) any overlapping trace
-	storageReq.StartTimeUnixNanos = req.Start
-	storageReq.EndTimeUnixNanos = req.End // Should this be exclusive?
+	// TODO - Make this dynamic since it can be faster to skip
+	// the trace-level timestamp check when all or most of the traces
+	// overlap the window.
+	//storageReq.StartTimeUnixNanos = req.Start
+	//storageReq.EndTimeUnixNanos = req.End // Should this be exclusive?
 	// (2) Only include spans that started in this time frame.
 	//     This is checked inside the evaluator
 	me.checkTime = true
