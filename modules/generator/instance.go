@@ -421,7 +421,7 @@ func (i *instance) QueryRange(ctx context.Context, req *tempopb.QueryRangeReques
 func (i *instance) queryRangeTraceQLToProto(set traceql.SeriesSet, req *tempopb.QueryRangeRequest) []*tempopb.TimeSeries {
 	resp := make([]*tempopb.TimeSeries, 0, len(set))
 
-	for _, s := range set {
+	for promLabels, s := range set {
 		labels := make([]commonv1proto.KeyValue, 0, len(s.Labels))
 		for _, label := range s.Labels {
 			labels = append(labels,
@@ -445,8 +445,9 @@ func (i *instance) queryRangeTraceQLToProto(set traceql.SeriesSet, req *tempopb.
 		}
 
 		ss := &tempopb.TimeSeries{
-			Labels:  labels,
-			Samples: samples,
+			PromLabels: promLabels,
+			Labels:     labels,
+			Samples:    samples,
 		}
 
 		resp = append(resp, ss)

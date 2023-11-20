@@ -735,78 +735,43 @@ func (q *Querier) QueryRange(ctx context.Context, req *tempopb.QueryRangeRequest
 	}
 
 	// // Assemble the rawResults from the generators in the pool
-
-	// allResults := traceqlmetrics.NewGrubbleResults()
-
-	series := []*tempopb.TimeSeries{}
+	var (
+		series           = make([]*tempopb.TimeSeries, 0)
+		aggregateSamples = make(map[string][]*tempopb.TimeSeries)
+		rawResults       *tempopb.QueryRangeResponse
+	)
 
 	for _, result := range lookupResults {
-		rawResults := result.response.(*tempopb.QueryRangeResponse)
-		series = append(series, rawResults.Series...)
+		rawResults = result.response.(*tempopb.QueryRangeResponse)
+
+		for _, s := range rawResults.Series {
+			if _, ok := aggregateSamples[s.PromLabels]; !ok {
+				aggregateSamples[s.PromLabels] = make([]*tempopb.TimeSeries, 0)
+				aggregateSamples[s.PromLabels] = append(aggregateSamples[s.PromLabels], s)
+				continue
+			}
+
+			for _, x := range aggregateSamples[s.PromLabels] {
+				for i, s := range x.Samples {
+					x.Samples[i].Value += s.Value
+				}
+			}
+		}
+	}
+
+	for labels, samples := range aggregateSamples {
+		for _, sample := range samples {
+			series = append(series, &tempopb.TimeSeries{
+				PromLabels: labels,
+				Samples:    sample.Samples,
+				Labels:     sample.Labels,
+			})
+		}
 	}
 
 	resp := &tempopb.QueryRangeResponse{
 		Series: series,
 	}
-
-	//
-	// var percentile float64
-	// switch req.Metric {
-	// case tempopb.SpanMetricsSelectRequest_P50:
-	// 	percentile = 0.5
-	// case tempopb.SpanMetricsSelectRequest_P90:
-	// 	percentile = 0.9
-	// case tempopb.SpanMetricsSelectRequest_P99:
-	// 	percentile = 0.99
-	// }
-	//
-	// // Record all combinations of key=value
-	// distinctness := map[traceql.Attribute]map[traceqlmetrics.Label]struct{}{}
-	// for k := range allResults.Series {
-	// 	values := distinctness[k.Key]
-	// 	if values == nil {
-	// 		values = map[traceqlmetrics.Label]struct{}{}
-	// 		distinctness[k.Key] = values
-	// 	}
-	// 	values[k] = struct{}{}
-	// }
-	//
-	// // Delete series with only 1 distinct value
-	// // except the mega summary which has no name
-	// for k := range distinctness {
-	// 	labels := distinctness[k]
-	// 	if len(labels) == 1 && k.Name != "" {
-	// 		for l := range labels {
-	// 			delete(allResults.Series, l)
-	// 			delete(distinctness, k)
-	// 			fmt.Println("Deleting single series", l.Key.String(), "=", l.Value.EncodeToString(false))
-	// 		}
-	// 	}
-	// }
-	//
-	// /*for k,labels := range distinctness {
-	// }*/
-	//
-	// sortedSeries := allResults.SortedByName()
-	// for _, series := range sortedSeries {
-	//
-	// 	thisResult := &tempopb.SpanMetricsSelectResult{}
-	// 	thisResult.LabelName = series.Label.Key.String()
-	// 	thisResult.LabelValue = series.Label.Value.EncodeToString(false)
-	//
-	// 	ts, percentiles, exemplarTraceIDs, exemplarDurations := series.PercentileVectorWithExemplar(percentile)
-	//
-	// 	for i := range ts {
-	// 		thisResult.Ts = append(thisResult.Ts, &tempopb.SpanMetricsSelectResultPoint{
-	// 			Time:             ts[i],
-	// 			Val:              time.Duration(int64(percentiles[i])).Seconds(),
-	// 			ExemplarTraceID:  exemplarTraceIDs[i],
-	// 			ExemplarDuration: exemplarDurations[i],
-	// 		})
-	// 	}
-	//
-	// 	resp.Data.Result = append(resp.Data.Result, thisResult)
-	// }
 
 	return resp, nil
 }

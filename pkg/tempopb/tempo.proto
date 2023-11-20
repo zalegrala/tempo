@@ -334,4 +334,6 @@ message TimeSeries {
   repeated Sample samples = 2 [(gogoproto.nullable) = false];
   // repeated Exemplar exemplars = 3 [ (gogoproto.nullable) = false ];
   // repeated Histogram histograms = 4 [ (gogoproto.nullable) = false ];
+  // TODO: review the LabelAdapter and migrate the use of this string
+  string prom_labels = 3;
 }
