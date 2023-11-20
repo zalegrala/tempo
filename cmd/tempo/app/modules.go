@@ -404,7 +404,7 @@ func (t *App) initQueryFrontend() (services.Service, error) {
 	// http metrics endpoints
 	t.Server.HTTP.Handle(addHTTPAPIPrefix(&t.cfg, api.PathSpanMetricsSummary), spanMetricsSummaryHandler)
 	t.Server.HTTP.Handle(addHTTPAPIPrefix(&t.cfg, api.PathMetricsQueryRange), queryRangeHandler)
-	t.Server.HTTP.Handle(api.PathPromQueryRange, queryRangeHandler)
+	t.Server.HTTP.Handle(addHTTPAPIPrefix(&t.cfg, api.PathPromQueryRange), queryRangeHandler)
 
 	// the query frontend needs to have knowledge of the blocks so it can shard search jobs
 	t.store.EnablePolling(context.Background(), nil)
