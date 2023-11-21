@@ -735,45 +735,50 @@ func (q *Querier) QueryRange(ctx context.Context, req *tempopb.QueryRangeRequest
 	}
 
 	// // Assemble the rawResults from the generators in the pool
-	var (
-		series           = make([]*tempopb.TimeSeries, 0)
-		aggregateSamples = make(map[string][]*tempopb.TimeSeries)
-		rawResults       *tempopb.QueryRangeResponse
-	)
-
-	for _, result := range lookupResults {
-		rawResults = result.response.(*tempopb.QueryRangeResponse)
-
-		for _, s := range rawResults.Series {
-			if _, ok := aggregateSamples[s.PromLabels]; !ok {
-				aggregateSamples[s.PromLabels] = make([]*tempopb.TimeSeries, 0)
-				aggregateSamples[s.PromLabels] = append(aggregateSamples[s.PromLabels], s)
-				continue
-			}
-
-			for _, x := range aggregateSamples[s.PromLabels] {
-				for i, s := range x.Samples {
-					x.Samples[i].Value += s.Value
-				}
-			}
-		}
-	}
-
-	for labels, samples := range aggregateSamples {
-		for _, sample := range samples {
-			series = append(series, &tempopb.TimeSeries{
-				PromLabels: labels,
-				Samples:    sample.Samples,
-				Labels:     sample.Labels,
-			})
-		}
+	superSeries := make([][]*tempopb.TimeSeries, len(lookupResults))
+	for i, result := range lookupResults {
+		superSeries[i] = result.response.(*tempopb.QueryRangeResponse).Series
 	}
 
 	resp := &tempopb.QueryRangeResponse{
-		Series: series,
+		Series: sumSeries(superSeries...),
 	}
 
 	return resp, nil
+}
+
+func sumSeries(superSeries ...[]*tempopb.TimeSeries) []*tempopb.TimeSeries {
+	if len(superSeries) == 0 {
+		return nil
+	}
+
+	if len(superSeries) == 1 {
+		return superSeries[0]
+	}
+
+	var (
+		result           = make([]*tempopb.TimeSeries, 0)
+		aggregateSamples = make(map[string]*tempopb.TimeSeries)
+	)
+
+	for _, set := range superSeries {
+		for _, series := range set {
+			if _, ok := aggregateSamples[series.PromLabels]; !ok {
+				aggregateSamples[series.PromLabels] = series
+				continue
+			}
+
+			for i, s := range series.Samples {
+				aggregateSamples[series.PromLabels].Samples[i].Value += s.Value
+			}
+		}
+	}
+
+	for _, series := range aggregateSamples {
+		result = append(result, series)
+	}
+
+	return result
 }
 
 func valuesToV2Response(distinctValues *util.DistinctValueCollector[tempopb.TagValue]) *tempopb.SearchTagValuesV2Response {
