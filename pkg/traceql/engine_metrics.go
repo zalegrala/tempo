@@ -206,7 +206,7 @@ func (g *GroupingAggregator) Observe(span Span) {
 
 	// Get grouping values
 	for i, lookups := range g.byLookups {
-		g.buf[i] = lookup(lookups, span.Attributes())
+		g.buf[i] = lookup(lookups, span)
 	}
 
 	agg, ok := g.series[g.buf]
@@ -379,9 +379,9 @@ func (e *Engine) CompileMetricsQueryRange(req *tempopb.QueryRangeRequest) (*Metr
 	return me, nil
 }
 
-func lookup(needles []Attribute, haystack map[Attribute]Static) Static {
+func lookup(needles []Attribute, haystack Span) Static {
 	for _, n := range needles {
-		if v, ok := haystack[n]; ok {
+		if v, ok := haystack.AttributeFor(n); ok {
 			return v
 		}
 	}
