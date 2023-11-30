@@ -1121,7 +1121,7 @@ storage:
         # block configuration
         block:
             # block format version. options: v2, vParquet, vParquet2, vParquet3
-            [version: <string> | default = vParquet2]
+            [version: <string> | default = vParquet3]
 
             # bloom filter false positive rate.  lower values create larger filters but fewer false positives
             [bloom_filter_false_positive: <float> | default = 0.01]
@@ -1323,6 +1323,9 @@ overrides:
       # Per-user block retention. If this value is set to 0 (default),
       # then block_retention in the compactor configuration is used.
       [block_retention: <duration> | default = 0s]
+      # Per-user compaction window. If this value is set to 0 (default),
+      # then block_retention in the compactor configuration is used.
+      [compaction_window: <duration> | default = 0s]
       
     # Metrics-generator related overrides
     metrics_generator:
@@ -1364,6 +1367,10 @@ overrides:
       # This setting is useful if you wish to test how many active series a tenant will generate, without
       # actually writing these metrics.
       [disable_collection: <bool> | default = false]
+        
+      # Per-user configuration of the trace-id label name. This value will be used as name for the label to store the
+      # trace ID of exemplars in generated metrics. If not set, the default value "trace_id" will be used.  
+      [trace_id_label_name: <string> | default = "trace_id"]  
 
       # This option only allows spans with end time that occur within the configured duration to be
       # considered in metrics generation.
