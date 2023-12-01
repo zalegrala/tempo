@@ -37,6 +37,8 @@ const (
 	urlParamEnd             = "end"
 	urlParamSpansPerSpanSet = "spss"
 	urlParamStep            = "step"
+	urlParamShard           = "shard"
+	urlParamOf              = "of"
 	urlParamSince           = "since"
 
 	// backend search (querier/serverless)
@@ -457,6 +459,32 @@ func ParseQueryRangeRequest(r *http.Request) (*tempopb.QueryRangeRequest, error)
 	}
 
 	return req, nil
+}
+
+func BuildQueryRangeRequest(req *http.Request, searchReq *tempopb.QueryRangeRequest) *http.Request {
+	if req == nil {
+		req = &http.Request{
+			URL: &url.URL{},
+		}
+	}
+
+	if searchReq == nil {
+		return req
+	}
+
+	q := req.URL.Query()
+	q.Set(urlParamStart, strconv.FormatUint(uint64(searchReq.Start), 10))
+	q.Set(urlParamEnd, strconv.FormatUint(uint64(searchReq.End), 10))
+	q.Set(urlParamStep, strconv.FormatUint(uint64(searchReq.Step), 10))
+	q.Set(urlParamShard, strconv.FormatUint(uint64(searchReq.Shard), 10))
+	q.Set(urlParamOf, strconv.FormatUint(uint64(searchReq.Of), 10))
+
+	if len(searchReq.Query) > 0 {
+		q.Set(urlParamQuery, searchReq.Query)
+	}
+	req.URL.RawQuery = q.Encode()
+
+	return req
 }
 
 func bounds(r *http.Request) (time.Time, time.Time, error) {
