@@ -458,6 +458,13 @@ func ParseQueryRangeRequest(r *http.Request) (*tempopb.QueryRangeRequest, error)
 		req.Step = uint64(step)
 	}
 
+	if of, err := strconv.Atoi(r.Form.Get(urlParamOf)); err == nil {
+		req.Of = uint32(of)
+	}
+	if shard, err := strconv.Atoi(r.Form.Get(urlParamShard)); err == nil {
+		req.Shard = uint32(shard)
+	}
+
 	return req, nil
 }
 

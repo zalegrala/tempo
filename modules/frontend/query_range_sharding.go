@@ -62,7 +62,15 @@ func newQueryRangeSharder(reader tempodb.Reader, o overrides.Interface, cfg Quer
 
 func (s queryRangeSharder) RoundTrip(r *http.Request) (*http.Response, error) {
 
-	isProm := strings.Contains(r.RequestURI, "/prom/api/v1/query_range")
+	// This route supports two flavors. (1) Prometheus-compatible (2) Tempo native
+	// Remember which flavor this is and swap it so all
+	// upstream calls are always Tempo native.
+	var isProm bool
+	if strings.Contains(r.RequestURI, api.PathPromQueryRange) {
+		isProm = true
+		r.URL.Path = strings.ReplaceAll(r.URL.Path, api.PathPromQueryRange, api.PathMetricsQueryRange)
+		r.RequestURI = strings.ReplaceAll(r.RequestURI, api.PathPromQueryRange, api.PathMetricsQueryRange)
+	}
 
 	searchReq, err := api.ParseQueryRangeRequest(r)
 	if err != nil {
@@ -80,7 +88,7 @@ func (s queryRangeSharder) RoundTrip(r *http.Request) (*http.Response, error) {
 			Body:       io.NopCloser(strings.NewReader(err.Error())),
 		}, nil
 	}
-	span, ctx := opentracing.StartSpanFromContext(ctx, "frontend.ShardSearch")
+	span, ctx := opentracing.StartSpanFromContext(ctx, "frontend.QueryRangeSharder")
 	defer span.Finish()
 
 	subCtx, subCancel := context.WithCancel(ctx)
@@ -129,12 +137,6 @@ func (s queryRangeSharder) RoundTrip(r *http.Request) (*http.Response, error) {
 
 		go func(innerR *http.Request) {
 			defer wg.Done()
-
-			// All internal calls are always tempo native format.
-			if isProm {
-				innerR.URL.Path = strings.ReplaceAll(innerR.URL.Path, "/prom/api/v1/query_range", "/api/metrics/query_range")
-				innerR.RequestURI = strings.ReplaceAll(innerR.RequestURI, "/prom/api/v1/query_range", "/api/metrics/query_range")
-			}
 
 			resp, err := s.next.RoundTrip(innerR)
 			if err != nil {
@@ -219,8 +221,8 @@ func (s *queryRangeSharder) blockMetas(start, end int64, tenantID string) []*bac
 	allMetas := s.reader.BlockMetas(tenantID)
 	metas := make([]*backend.BlockMeta, 0, len(allMetas)/50) // divide by 50 for luck
 	for _, m := range allMetas {
-		if m.StartTime.Unix() <= end &&
-			m.EndTime.Unix() >= start {
+		if m.StartTime.UnixNano() <= end &&
+			m.EndTime.UnixNano() >= start {
 			metas = append(metas, m)
 		}
 	}
@@ -293,8 +295,8 @@ func (s *queryRangeSharder) buildBackendRequests(ctx context.Context, tenantID s
 
 			subR := parent.Clone(ctx)
 			subR.Header.Set(user.OrgIDHeaderName, tenantID)
-
 			subR = api.BuildQueryRangeRequest(subR, &shardR)
+			subR.RequestURI = buildUpstreamRequestURI(parent.URL.Path, subR.URL.Query())
 
 			select {
 			case reqCh <- &backendReqMsg{req: subR}:
@@ -378,6 +380,13 @@ func (s *queryRangeSharder) convertToPromFormat(resp *tempopb.QueryRangeResponse
 		}
 		return false
 	})
+
+	// Sort in increasing timestamp so that lines are drawn correctly
+	for _, series := range resp.Series {
+		sort.Slice(series.Samples, func(i, j int) bool {
+			return series.Samples[i].TimestampMs < series.Samples[j].TimestampMs
+		})
+	}
 
 	promResp := PromResponse{
 		Status: "success",
