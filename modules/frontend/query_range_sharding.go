@@ -2,11 +2,14 @@ package frontend
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -58,6 +61,9 @@ func newQueryRangeSharder(reader tempodb.Reader, o overrides.Interface, cfg Quer
 }
 
 func (s queryRangeSharder) RoundTrip(r *http.Request) (*http.Response, error) {
+
+	isProm := strings.Contains(r.RequestURI, "/prom/api/v1/query_range")
+
 	searchReq, err := api.ParseQueryRangeRequest(r)
 	if err != nil {
 		return &http.Response{
@@ -102,10 +108,10 @@ func (s queryRangeSharder) RoundTrip(r *http.Request) (*http.Response, error) {
 		reqCh <- &backendReqMsg{req: ingesterReq}
 	}
 
-	/*err = s.backendRequests(subCtx, tenantID, r, searchReq, reqCh, stopCh)
+	err = s.backendRequests(subCtx, tenantID, r, searchReq, reqCh, stopCh)
 	if err != nil {
 		return nil, err
-	}*/
+	}
 
 	wg := boundedwaitgroup.New(uint(s.cfg.ConcurrentRequests))
 	c := traceql.QueryRangeCombiner{}
@@ -123,6 +129,12 @@ func (s queryRangeSharder) RoundTrip(r *http.Request) (*http.Response, error) {
 
 		go func(innerR *http.Request) {
 			defer wg.Done()
+
+			// All internal calls are always tempo native format.
+			if isProm {
+				innerR.URL.Path = strings.ReplaceAll(innerR.URL.Path, "/prom/api/v1/query_range", "/api/metrics/query_range")
+				innerR.RequestURI = strings.ReplaceAll(innerR.RequestURI, "/prom/api/v1/query_range", "/api/metrics/query_range")
+			}
 
 			resp, err := s.next.RoundTrip(innerR)
 			if err != nil {
@@ -169,12 +181,24 @@ func (s queryRangeSharder) RoundTrip(r *http.Request) (*http.Response, error) {
 	// wait for all goroutines running in wg to finish or cancelled
 	wg.Wait()
 
-	m := &jsonpb.Marshaler{}
-	bodyString, err := m.MarshalToString(&tempopb.QueryRangeResponse{
-		Series: c.Results(),
-	})
-	if err != nil {
-		return nil, err
+	var bodyString string
+	if isProm {
+		promResp := s.convertToPromFormat(&tempopb.QueryRangeResponse{
+			Series: c.Results(),
+		})
+		bytes, err := json.Marshal(promResp)
+		if err != nil {
+			return nil, err
+		}
+		bodyString = string(bytes)
+	} else {
+		m := &jsonpb.Marshaler{}
+		bodyString, err = m.MarshalToString(&tempopb.QueryRangeResponse{
+			Series: c.Results(),
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	resp := &http.Response{
@@ -216,6 +240,7 @@ func (s *queryRangeSharder) backendRequests(ctx context.Context, tenantID string
 
 	// no need to search backend
 	if start == end {
+		close(reqCh)
 		return nil
 	}
 
@@ -227,13 +252,28 @@ func (s *queryRangeSharder) backendRequests(ctx context.Context, tenantID string
 }
 
 func (s *queryRangeSharder) buildBackendRequests(ctx context.Context, tenantID string, parent *http.Request, searchReq *tempopb.QueryRangeRequest, reqCh chan *backendReqMsg, stopCh <-chan struct{}) {
+	defer close(reqCh)
+
 	start := searchReq.Start
 	end := searchReq.End
 	timeWindowSize := uint64(s.cfg.Interval.Nanoseconds())
+	cutoff := uint64(time.Now().Add(-s.cfg.QueryBackendAfter).UnixNano())
 
-	for start <= end {
-		blocks := s.blockMetas(int64(start), int64(start+timeWindowSize), tenantID)
+	if end > cutoff {
+		end = cutoff
+	}
+
+	for start < end {
+
+		thisStart := start
+		thisEnd := start + timeWindowSize
+		if thisEnd > end {
+			thisEnd = end
+		}
+
+		blocks := s.blockMetas(int64(thisStart), int64(thisEnd), tenantID)
 		if len(blocks) == 0 {
+			start = thisEnd
 			continue
 		}
 
@@ -246,8 +286,8 @@ func (s *queryRangeSharder) buildBackendRequests(ctx context.Context, tenantID s
 
 		for i := uint32(1); i <= shards; i++ {
 			shardR := *searchReq
-			shardR.Start = start
-			shardR.End = start + timeWindowSize
+			shardR.Start = thisStart
+			shardR.End = thisEnd
 			shardR.Shard = uint32(i)
 			shardR.Of = uint32(shards)
 
@@ -263,7 +303,7 @@ func (s *queryRangeSharder) buildBackendRequests(ctx context.Context, tenantID s
 			}
 		}
 
-		start += timeWindowSize
+		start = thisEnd
 	}
 }
 
@@ -284,14 +324,32 @@ func (s *queryRangeSharder) backendRange(start, end uint64, queryBackendAfter ti
 }
 
 func (s *queryRangeSharder) generatorRequest(ctx context.Context, tenantID string, parent *http.Request, searchReq tempopb.QueryRangeRequest) (*http.Request, error) {
-	subR := parent.Clone(ctx)
 
+	now := time.Now()
+	cutoff := uint64(now.Add(-s.cfg.QueryBackendAfter).UnixNano())
+
+	// if there's no overlap between the query and ingester range just return nil
+	if searchReq.End < cutoff {
+		return nil, nil
+	}
+
+	if searchReq.Start < cutoff {
+		searchReq.Start = cutoff
+	}
+
+	// if ingester start == ingester end then we don't need to query it
+	if searchReq.Start == searchReq.End {
+		return nil, nil
+	}
+
+	subR := parent.Clone(ctx)
 	subR.Header.Set(user.OrgIDHeaderName, tenantID)
+	// Shard 0 indicates generator request
 	searchReq.Shard = 0
 	searchReq.Of = 0
 	subR = api.BuildQueryRangeRequest(subR, &searchReq)
-
 	subR.RequestURI = buildUpstreamRequestURI(subR.URL.Path, subR.URL.Query())
+
 	return subR, nil
 }
 
@@ -304,4 +362,78 @@ func (s *queryRangeSharder) maxDuration(tenantID string) time.Duration {
 	}
 
 	return s.cfg.MaxDuration
+}
+
+func (s *queryRangeSharder) convertToPromFormat(resp *tempopb.QueryRangeResponse) PromResponse {
+
+	// Sort series alphabetically so they are stable in the UI
+	sort.Slice(resp.Series, func(i, j int) bool {
+		a := resp.Series[i].Labels
+		b := resp.Series[j].Labels
+
+		for k := 0; k < len(a) && k < len(b); k++ {
+			if a[k].Value.GetStringValue() < b[k].Value.GetStringValue() {
+				return true
+			}
+		}
+		return false
+	})
+
+	promResp := PromResponse{
+		Status: "success",
+		Data:   &PromData{ResultType: "matrix"},
+	}
+
+	for _, series := range resp.Series {
+		promResult := PromResult{
+			Metric: map[string]string{},
+		}
+
+		for _, label := range series.Labels {
+			v := label.Value.GetStringValue()
+			if v == "" || v == "nill" {
+				continue
+			}
+
+			promResult.Metric[label.Key] = label.Value.GetStringValue()
+		}
+
+		promResult.Values = make([]interface{}, 0, len(series.Samples))
+		for _, ts := range series.Samples {
+			promResult.Values = append(promResult.Values, []interface{}{
+				float64(ts.TimestampMs) / 1000.0,           // float for timestamp. assume it's seconds
+				strconv.FormatFloat(ts.Value, 'f', -1, 64), // making assumptions about the float format returned from prom
+			})
+		}
+
+		promResp.Data.Result = append(promResp.Data.Result, promResult)
+	}
+
+	return promResp
+}
+
+func (s *queryRangeSharder) convertToPromError(err error) PromResponse {
+	return PromResponse{
+		Status:    "error",
+		ErrorType: "bad_data",
+		Error:     err.Error(),
+	}
+}
+
+type PromResponse struct {
+	Status    string    `json:"status"`
+	Data      *PromData `json:"data,omitempty"`
+	ErrorType string    `json:"errorType,omitempty"`
+	Error     string    `json:"error,omitempty"`
+}
+
+type PromData struct {
+	ResultType string       `json:"resultType"`
+	Result     []PromResult `json:"result"`
+}
+
+type PromResult struct {
+	Metric    map[string]string `json:"metric"`
+	Values    []interface{}     `json:"values"`    // first entry is timestamp (float), second is value (string)
+	Exemplars []interface{}     `json:"exemplars"` // first entry is timestamp (float), second is duration (float seconds), third is traceID (string)
 }

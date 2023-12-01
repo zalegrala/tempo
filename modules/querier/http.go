@@ -2,12 +2,9 @@ package querier
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"sort"
-	"strconv"
 	"time"
 
 	"github.com/golang/protobuf/jsonpb" //nolint:all //deprecated
@@ -303,9 +300,8 @@ func (q *Querier) SpanMetricsSummaryHandler(w http.ResponseWriter, r *http.Reque
 
 func (q *Querier) QueryRangeHandler(w http.ResponseWriter, r *http.Request) {
 	var (
-		err      error
-		resp     *tempopb.QueryRangeResponse
-		promResp PromResponse
+		err  error
+		resp *tempopb.QueryRangeResponse
 	)
 
 	// Enforce the query timeout while querying backends
@@ -329,29 +325,22 @@ func (q *Querier) QueryRangeHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err != nil {
-			promResp.Status = "error"
-			promResp.ErrorType = "bad_data"
-			promResp.Error = err.Error()
 			span.SetTag("error", err.Error())
 		}
 	}
 
 	defer func() {
-		var (
-			jsBytes []byte
-			funcErr error
-		)
-
 		errHandler(ctx, span, err)
+		m := jsonpb.Marshaler{}
 
-		jsBytes, funcErr = json.Marshal(promResp)
+		jsBytes, funcErr := m.MarshalToString(resp)
 		if funcErr != nil {
 			errHandler(ctx, span, funcErr)
 			http.Error(w, funcErr.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		_, funcErr = w.Write(jsBytes)
+		_, funcErr = w.Write([]byte(jsBytes))
 		if funcErr != nil {
 			errHandler(ctx, span, funcErr)
 			http.Error(w, funcErr.Error(), http.StatusInternalServerError)
@@ -379,47 +368,6 @@ func (q *Querier) QueryRangeHandler(w http.ResponseWriter, r *http.Request) {
 		errHandler(ctx, span, err)
 		return
 	}
-
-	promResp.Status = "success"
-	promResp.Data = &PromData{ResultType: "matrix"}
-
-	// Sort series alphabetically so they are stable in the UI
-	sort.Slice(resp.Series, func(i, j int) bool {
-		a := resp.Series[i].Labels
-		b := resp.Series[j].Labels
-
-		for k := 0; k < len(a) && k < len(b); k++ {
-			if a[k].Value.GetStringValue() < b[k].Value.GetStringValue() {
-				return true
-			}
-		}
-		return false
-	})
-
-	for _, series := range resp.Series {
-		promResult := PromResult{
-			Metric: map[string]string{},
-		}
-
-		for _, label := range series.Labels {
-			v := label.Value.GetStringValue()
-			if v == "" || v == "nill" {
-				continue
-			}
-
-			promResult.Metric[label.Key] = label.Value.GetStringValue()
-		}
-
-		promResult.Values = make([]interface{}, 0, len(series.Samples))
-		for _, ts := range series.Samples {
-			promResult.Values = append(promResult.Values, []interface{}{
-				float64(ts.TimestampMs) / 1000.0,           // float for timestamp. assume it's seconds
-				strconv.FormatFloat(ts.Value, 'f', -1, 64), // making assumptions about the float format returned from prom
-			})
-		}
-
-		promResp.Data.Result = append(promResp.Data.Result, promResult)
-	}
 }
 
 func handleError(w http.ResponseWriter, err error) {
@@ -440,23 +388,4 @@ func handleError(w http.ResponseWriter, err error) {
 	}
 
 	http.Error(w, err.Error(), http.StatusInternalServerError)
-}
-
-// objects to mock  the prometheus http response
-type PromResponse struct {
-	Status    string    `json:"status"`
-	Data      *PromData `json:"data,omitempty"`
-	ErrorType string    `json:"errorType,omitempty"`
-	Error     string    `json:"error,omitempty"`
-}
-
-type PromData struct {
-	ResultType string       `json:"resultType"`
-	Result     []PromResult `json:"result"`
-}
-
-type PromResult struct {
-	Metric    map[string]string `json:"metric"`
-	Values    []interface{}     `json:"values"`    // first entry is timestamp (float), second is value (string)
-	Exemplars []interface{}     `json:"exemplars"` // first entry is timestamp (float), second is duration (float seconds), third is traceID (string)
 }

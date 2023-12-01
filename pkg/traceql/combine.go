@@ -125,16 +125,16 @@ type QueryRangeCombiner struct {
 	ts map[string]*tempopb.TimeSeries
 }
 
-func (q *QueryRangeCombiner) Combine(superSeries []*tempopb.TimeSeries) {
-	if len(superSeries) == 0 {
+func (q *QueryRangeCombiner) Combine(set []*tempopb.TimeSeries) {
+	if len(set) == 0 {
 		return
 	}
 
 	if q.ts == nil {
-		q.ts = make(map[string]*tempopb.TimeSeries, len(superSeries))
+		q.ts = make(map[string]*tempopb.TimeSeries, len(set))
 	}
 
-	for _, series := range superSeries {
+	for _, series := range set {
 
 		existing, ok := q.ts[series.PromLabels]
 		if !ok {

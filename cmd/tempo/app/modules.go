@@ -348,9 +348,6 @@ func (t *App) initQuerier() (services.Service, error) {
 
 	queryRangeHandler := t.HTTPAuthMiddleware.Wrap(http.HandlerFunc(t.querier.QueryRangeHandler))
 	t.Server.HTTP.Handle(path.Join(api.PathPrefixQuerier, addHTTPAPIPrefix(&t.cfg, api.PathMetricsQueryRange)), queryRangeHandler)
-	t.Server.HTTP.Handle(path.Join(api.PathPrefixQuerier, addHTTPAPIPrefix(&t.cfg, api.PathPromQueryRange)), queryRangeHandler)
-	// To support the prometheus query_range endpoint, we need to register the handler at the root path.
-	t.Server.HTTP.Handle(api.PathPromQueryRange, queryRangeHandler)
 
 	return t.querier, t.querier.CreateAndRegisterWorker(t.Server.HTTPServer.Handler)
 }

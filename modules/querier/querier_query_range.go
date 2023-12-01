@@ -17,7 +17,7 @@ func (q *Querier) QueryRange(ctx context.Context, req *tempopb.QueryRangeRequest
 	}
 
 	// Backend requests go here
-	return nil, nil
+	return &tempopb.QueryRangeResponse{}, nil
 }
 
 func (q *Querier) queryRangeRecent(ctx context.Context, req *tempopb.QueryRangeRequest) (*tempopb.QueryRangeResponse, error) {
