@@ -80,6 +80,7 @@ func (q *Querier) queryBackend(ctx context.Context, req *tempopb.QueryRangeReque
 			return q.store.Fetch(ctx, m, req, common.DefaultSearchOptions())
 		})
 
+		// TODO - span deduping
 		err = eval.Do(ctx, f)
 		if err != nil {
 			return nil, err

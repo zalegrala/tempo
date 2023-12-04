@@ -234,6 +234,7 @@ func (s *queryRangeSharder) backendRequests(ctx context.Context, tenantID string
 
 	// request without start or end, search only in generator
 	if searchReq.Start == 0 || searchReq.End == 0 {
+		close(reqCh)
 		return nil
 	}
 

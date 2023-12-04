@@ -149,9 +149,9 @@ func (q *QueryRangeCombiner) Combine(set []*tempopb.TimeSeries) {
 func (QueryRangeCombiner) combine(in *tempopb.TimeSeries, out *tempopb.TimeSeries) {
 outer:
 	for _, sample := range in.Samples {
-		for _, existing := range out.Samples {
+		for i, existing := range out.Samples {
 			if sample.TimestampMs == existing.TimestampMs {
-				existing.Value += sample.Value
+				out.Samples[i].Value += sample.Value
 				continue outer
 			}
 		}
