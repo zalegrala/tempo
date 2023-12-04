@@ -61,6 +61,7 @@ func newQueryRangeSharder(reader tempodb.Reader, o overrides.Interface, cfg Quer
 }
 
 func (s queryRangeSharder) RoundTrip(r *http.Request) (*http.Response, error) {
+	now := time.Now()
 
 	// This route supports two flavors. (1) Prometheus-compatible (2) Tempo native
 	// Remember which flavor this is and swap it so all
@@ -68,8 +69,12 @@ func (s queryRangeSharder) RoundTrip(r *http.Request) (*http.Response, error) {
 	var isProm bool
 	if strings.Contains(r.RequestURI, api.PathPromQueryRange) {
 		isProm = true
+		// Swap upstream calls to the Tempo-native paths
 		r.URL.Path = strings.ReplaceAll(r.URL.Path, api.PathPromQueryRange, api.PathMetricsQueryRange)
 		r.RequestURI = strings.ReplaceAll(r.RequestURI, api.PathPromQueryRange, api.PathMetricsQueryRange)
+		// Prom endpoint is called with 1-second precision timestamps
+		// Round "now" to 1-second also.
+		now = time.Unix(now.Unix(), 0)
 	}
 
 	searchReq, err := api.ParseQueryRangeRequest(r)
@@ -116,7 +121,7 @@ func (s queryRangeSharder) RoundTrip(r *http.Request) (*http.Response, error) {
 		reqCh <- &backendReqMsg{req: ingesterReq}
 	}
 
-	err = s.backendRequests(subCtx, tenantID, r, searchReq, reqCh, stopCh)
+	err = s.backendRequests(subCtx, tenantID, r, searchReq, now, reqCh, stopCh)
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +235,7 @@ func (s *queryRangeSharder) blockMetas(start, end int64, tenantID string) []*bac
 	return metas
 }
 
-func (s *queryRangeSharder) backendRequests(ctx context.Context, tenantID string, parent *http.Request, searchReq *tempopb.QueryRangeRequest, reqCh chan *backendReqMsg, stopCh <-chan struct{}) error {
+func (s *queryRangeSharder) backendRequests(ctx context.Context, tenantID string, parent *http.Request, searchReq *tempopb.QueryRangeRequest, now time.Time, reqCh chan *backendReqMsg, stopCh <-chan struct{}) error {
 
 	// request without start or end, search only in generator
 	if searchReq.Start == 0 || searchReq.End == 0 {
@@ -239,7 +244,12 @@ func (s *queryRangeSharder) backendRequests(ctx context.Context, tenantID string
 	}
 
 	// calculate duration (start and end) to search the backend blocks
-	start, end := s.backendRange(searchReq.Start, searchReq.End, time.Hour)
+	start, end := s.backendRange(now, searchReq.Start, searchReq.End, s.cfg.QueryBackendAfter)
+
+	fmt.Println("Backend request range:",
+		"reqStart", time.Unix(0, int64(searchReq.Start)), "reqEnd", time.Unix(0, int64(searchReq.End)),
+		"start", time.Unix(0, int64(start)), "end", time.Unix(0, int64(end)),
+	)
 
 	// no need to search backend
 	if start == end {
@@ -248,23 +258,16 @@ func (s *queryRangeSharder) backendRequests(ctx context.Context, tenantID string
 	}
 
 	go func() {
-		s.buildBackendRequests(ctx, tenantID, parent, searchReq, reqCh, stopCh)
+		s.buildBackendRequests(ctx, tenantID, parent, searchReq, start, end, reqCh, stopCh)
 	}()
 
 	return nil
 }
 
-func (s *queryRangeSharder) buildBackendRequests(ctx context.Context, tenantID string, parent *http.Request, searchReq *tempopb.QueryRangeRequest, reqCh chan *backendReqMsg, stopCh <-chan struct{}) {
+func (s *queryRangeSharder) buildBackendRequests(ctx context.Context, tenantID string, parent *http.Request, searchReq *tempopb.QueryRangeRequest, start, end uint64, reqCh chan *backendReqMsg, stopCh <-chan struct{}) {
 	defer close(reqCh)
 
-	start := searchReq.Start
-	end := searchReq.End
 	timeWindowSize := uint64(s.cfg.Interval.Nanoseconds())
-	cutoff := uint64(time.Now().Add(-s.cfg.QueryBackendAfter).UnixNano())
-
-	if end > cutoff {
-		end = cutoff
-	}
 
 	for start < end {
 
@@ -310,8 +313,7 @@ func (s *queryRangeSharder) buildBackendRequests(ctx context.Context, tenantID s
 	}
 }
 
-func (s *queryRangeSharder) backendRange(start, end uint64, queryBackendAfter time.Duration) (uint64, uint64) {
-	now := time.Now()
+func (s *queryRangeSharder) backendRange(now time.Time, start, end uint64, queryBackendAfter time.Duration) (uint64, uint64) {
 	backendAfter := uint64(now.Add(-queryBackendAfter).UnixNano())
 
 	// adjust start/end if necessary. if the entire query range was inside backendAfter then
