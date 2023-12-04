@@ -85,6 +85,14 @@ func (s queryRangeSharder) RoundTrip(r *http.Request) (*http.Response, error) {
 		}, nil
 	}
 
+	_, err = traceql.Parse(searchReq.Query)
+	if err != nil {
+		return &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Body:       io.NopCloser(strings.NewReader(err.Error())),
+		}, nil
+	}
+
 	ctx := r.Context()
 	tenantID, err := user.ExtractOrgID(ctx)
 	if err != nil {

@@ -15,7 +15,6 @@ import (
 	"github.com/grafana/tempo/pkg/api"
 	"github.com/grafana/tempo/pkg/model/trace"
 	"github.com/grafana/tempo/pkg/tempopb"
-	"github.com/grafana/tempo/pkg/traceql"
 )
 
 const (
@@ -354,12 +353,6 @@ func (q *Querier) QueryRangeHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		errHandler(ctx, span, err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	_, err = traceql.Parse(req.Query)
-	if err != nil {
-		errHandler(ctx, span, err)
 		return
 	}
 
