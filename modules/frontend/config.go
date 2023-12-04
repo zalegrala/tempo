@@ -82,8 +82,8 @@ func (cfg *Config) RegisterFlagsAndApplyDefaults(string, *flag.FlagSet) {
 		Sharder: QueryRangeSharderConfig{
 			QueryBackendAfter:     time.Hour,
 			ConcurrentRequests:    defaultConcurrentRequests,
-			TargetBytesPerRequest: 1024 * 1024 * 1024,
-			Interval:              15 * time.Minute,
+			TargetBytesPerRequest: 100 * 1024 * 1024,
+			Interval:              5 * time.Minute,
 		},
 	}
 }
