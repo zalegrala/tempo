@@ -15,7 +15,6 @@ import (
 	gen "github.com/grafana/tempo/modules/generator/processor"
 	"github.com/grafana/tempo/pkg/model"
 	"github.com/grafana/tempo/pkg/tempopb"
-	v1 "github.com/grafana/tempo/pkg/tempopb/trace/v1"
 	"github.com/grafana/tempo/pkg/traceql"
 	"github.com/grafana/tempo/pkg/traceqlmetrics"
 	"github.com/grafana/tempo/pkg/util/log"
@@ -104,17 +103,19 @@ func (p *Processor) PushSpans(_ context.Context, req *tempopb.PushSpansRequest) 
 	p.liveTracesMtx.Lock()
 	defer p.liveTracesMtx.Unlock()
 
-	var count int
+	//var count int
 	before := p.liveTraces.Len()
 
 	for _, batch := range req.Batches {
-		if batch, count = filterBatch(batch); batch != nil {
-			err := p.liveTraces.Push(batch, p.Cfg.MaxLiveTraces)
-			if errors.Is(err, errMaxExceeded) {
-				metricDroppedTraces.WithLabelValues(p.tenant, reasonLiveTracesExceeded).Inc()
-			}
-			metricTotalSpans.WithLabelValues(p.tenant).Add(float64(count))
+		//if batch, count = filterBatch(batch); batch != nil {
+		err := p.liveTraces.Push(batch, p.Cfg.MaxLiveTraces)
+		if errors.Is(err, errMaxExceeded) {
+			metricDroppedTraces.WithLabelValues(p.tenant, reasonLiveTracesExceeded).Inc()
 		}
+		for _, ss := range batch.ScopeSpans {
+			metricTotalSpans.WithLabelValues(p.tenant).Add(float64(len(ss.Spans)))
+		}
+		//}
 	}
 
 	after := p.liveTraces.Len()
@@ -675,7 +676,7 @@ func (p *Processor) recordBlockBytes() {
 // filterBatch to only root spans or kind==server. Does not modify the input
 // but returns a new struct referencing the same input pointers. Returns nil
 // if there were no matching spans.
-func filterBatch(batch *v1.ResourceSpans) (*v1.ResourceSpans, int) {
+/*func filterBatch(batch *v1.ResourceSpans) (*v1.ResourceSpans, int) {
 	var keep int
 	var keepSS []*v1.ScopeSpans
 	for _, ss := range batch.ScopeSpans {
@@ -704,7 +705,7 @@ func filterBatch(batch *v1.ResourceSpans) (*v1.ResourceSpans, int) {
 	}
 
 	return nil, 0
-}
+}*/
 
 func metricSeriesToProto(series traceqlmetrics.MetricSeries) []*tempopb.KeyValue {
 	var r []*tempopb.KeyValue
