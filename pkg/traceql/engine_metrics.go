@@ -183,9 +183,8 @@ func NewGroupingAggregator(aggName string, innerAgg func() RangeAggregator, by [
 	lookups := make([][]Attribute, len(by))
 	for i, attr := range by {
 		if attr.Intrinsic == IntrinsicNone && attr.Scope == AttributeScopeNone {
-			// Unscoped attribute. Also check span-level, then resource-level.
+			// Unscoped attribute. Check span-level, then resource-level.
 			lookups[i] = []Attribute{
-				attr,
 				NewScopedAttribute(AttributeScopeSpan, false, attr.Name),
 				NewScopedAttribute(AttributeScopeResource, false, attr.Name),
 			}
