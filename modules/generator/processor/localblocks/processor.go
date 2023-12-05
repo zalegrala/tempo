@@ -410,7 +410,7 @@ func (p *Processor) QueryRange(ctx context.Context, req *tempopb.QueryRangeReque
 		blocks = append(blocks, b)
 	}
 
-	eval, err := traceql.NewEngine().CompileMetricsQueryRange(req)
+	eval, err := traceql.NewEngine().CompileMetricsQueryRange(req, false)
 	if err != nil {
 		return nil, err
 	}

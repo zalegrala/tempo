@@ -61,7 +61,7 @@ func (q *Querier) queryBackend(ctx context.Context, req *tempopb.QueryRangeReque
 		return nil, err
 	}
 
-	eval, err := traceql.NewEngine().CompileMetricsQueryRange(req)
+	eval, err := traceql.NewEngine().CompileMetricsQueryRange(req, true)
 	if err != nil {
 		return nil, err
 	}

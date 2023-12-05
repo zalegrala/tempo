@@ -2,6 +2,7 @@ package traceql
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"time"
@@ -283,7 +284,7 @@ func (u *UngroupedAggregator) Series() SeriesSet {
 
 // ExecuteMetricsQueryRange - Execute the given metrics query. Just a wrapper around CompileMetricsQueryRange
 func (e *Engine) ExecuteMetricsQueryRange(ctx context.Context, req *tempopb.QueryRangeRequest, fetcher SpansetFetcher) (results SeriesSet, err error) {
-	eval, err := e.CompileMetricsQueryRange(req)
+	eval, err := e.CompileMetricsQueryRange(req, false)
 	if err != nil {
 		return nil, err
 	}
@@ -297,7 +298,7 @@ func (e *Engine) ExecuteMetricsQueryRange(ctx context.Context, req *tempopb.Quer
 }
 
 // CompileMetricsQueryRange returns an evalulator that can be reused across multiple data sources.
-func (e *Engine) CompileMetricsQueryRange(req *tempopb.QueryRangeRequest) (*MetricsEvalulator, error) {
+func (e *Engine) CompileMetricsQueryRange(req *tempopb.QueryRangeRequest, dedupeSpans bool) (*MetricsEvalulator, error) {
 	if req.Start <= 0 {
 		return nil, fmt.Errorf("start required")
 	}
@@ -326,6 +327,7 @@ func (e *Engine) CompileMetricsQueryRange(req *tempopb.QueryRangeRequest) (*Metr
 	me := &MetricsEvalulator{
 		storageReq:      storageReq,
 		metricsPipeline: metricsPipeline,
+		dedupeSpans:     dedupeSpans,
 	}
 
 	if req.Of > 1 {
@@ -363,6 +365,14 @@ func (e *Engine) CompileMetricsQueryRange(req *tempopb.QueryRangeRequest) (*Metr
 			storageReq.SecondPassConditions = append(storageReq.SecondPassConditions, Condition{Attribute: startTime})
 		}
 	}
+
+	if dedupeSpans {
+		spanID := NewIntrinsic(IntrinsicSpanID)
+		if !storageReq.HasAttribute(spanID) {
+			storageReq.SecondPassConditions = append(storageReq.SecondPassConditions, Condition{Attribute: spanID})
+		}
+	}
+
 	// (1) any overlapping trace
 	// TODO - Make this dynamic since it can be faster to skip
 	// the trace-level timestamp check when all or most of the traces
@@ -397,10 +407,15 @@ func lookup(needles []Attribute, haystack Span) Static {
 }
 
 type MetricsEvalulator struct {
-	start, end      uint64
-	checkTime       bool
+	start, end  uint64
+	checkTime   bool
+	dedupeSpans bool
+	//deduper         *SpanBloomDeduper
+	deduper         *SpanDeduper
 	storageReq      *FetchSpansRequest
 	metricsPipeline metricsFirstStageElement
+	count           int
+	deduped         int
 }
 
 func (e *MetricsEvalulator) Do(ctx context.Context, f SpansetFetcher) error {
@@ -410,6 +425,11 @@ func (e *MetricsEvalulator) Do(ctx context.Context, f SpansetFetcher) error {
 	}
 	if err != nil {
 		return err
+	}
+
+	if e.dedupeSpans && e.deduper == nil {
+		e.deduper = NewSpanDeduper()
+		//e.deduper = NewSpanBloomDeduper()
 	}
 
 	defer fetch.Results.Close()
@@ -431,6 +451,12 @@ func (e *MetricsEvalulator) Do(ctx context.Context, f SpansetFetcher) error {
 				}
 			}
 
+			if e.dedupeSpans && e.deduper.Skip(s.ID()) {
+				e.deduped++
+				continue
+			}
+
+			e.count++
 			e.metricsPipeline.observe(s)
 		}
 
@@ -440,6 +466,83 @@ func (e *MetricsEvalulator) Do(ctx context.Context, f SpansetFetcher) error {
 	return nil
 }
 
+func (e *MetricsEvalulator) SpanCount() {
+	fmt.Println(e.count, e.deduped)
+}
+
 func (e *MetricsEvalulator) Results() (SeriesSet, error) {
 	return e.metricsPipeline.result(), nil
 }
+
+// SpanDeduper using sharded maps in-memory.  So far this is the most
+// performant.  We store the lower 32-bits of every span ID in a map.
+// There are 256-maps sharded by the the first byte, so we are
+// only remembering 5 bytes of every 8-byte span ID.  Is this
+// good enough? Maybe... let's find out!
+type SpanDeduper struct {
+	m []map[uint32]struct{}
+}
+
+func NewSpanDeduper() *SpanDeduper {
+	maps := make([]map[uint32]struct{}, 256)
+	for i := range maps {
+		maps[i] = make(map[uint32]struct{}, 1000)
+	}
+	return &SpanDeduper{
+		m: maps,
+	}
+}
+
+func (d *SpanDeduper) Skip(id []byte) bool {
+	if len(id) != 8 {
+		return false
+	}
+
+	m := d.m[id[0]]
+	v := binary.BigEndian.Uint32(id[4:8])
+
+	if _, ok := m[v]; ok {
+		return true
+	}
+
+	m[v] = struct{}{}
+	return false
+}
+
+/*
+// This dedupes span IDs using a chain of bloom filters.  I thought it
+// was going to be awesome but it is WAY TOO SLOW
+type SpanBloomDeduper struct {
+	blooms []*bloom.BloomFilter
+	count  int
+}
+
+func NewSpanBloomDeduper() *SpanBloomDeduper {
+	//first := bloom.NewWithEstimates(1_000_000, 0.001)
+	first := bloom.New(999499917, 1)
+
+	return &SpanBloomDeduper{
+		blooms: []*bloom.BloomFilter{first},
+	}
+}
+
+func (d *SpanBloomDeduper) Skip(id []byte) bool {
+
+	for _, b := range d.blooms {
+		if b.Test(id) {
+			return true
+		}
+	}
+
+	d.count++
+	if d.count%1_000_000 == 0 {
+		// Time for another filter
+		//d.blooms = append(d.blooms, bloom.NewWithEstimates(1_000_000, 0.001))
+		d.blooms = append(d.blooms, bloom.New(999499917, 1))
+	}
+
+	// Set in latest filter
+	d.blooms[len(d.blooms)-1].Add(id)
+
+	return false
+}*/
