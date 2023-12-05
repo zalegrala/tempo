@@ -146,7 +146,7 @@ func TestCompileMetricsQueryRange(t *testing.T) {
 				Start: c.start,
 				End:   c.end,
 				Step:  c.step,
-			})
+			}, false)
 
 			if c.expectedErr != nil {
 				require.EqualError(t, err, c.expectedErr.Error())
