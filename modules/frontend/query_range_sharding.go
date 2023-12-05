@@ -410,11 +410,6 @@ func (s *queryRangeSharder) convertToPromFormat(resp *tempopb.QueryRangeResponse
 		}
 
 		for _, label := range series.Labels {
-			v := label.Value.GetStringValue()
-			if v == "" || v == "nill" {
-				continue
-			}
-
 			promResult.Metric[label.Key] = label.Value.GetStringValue()
 		}
 

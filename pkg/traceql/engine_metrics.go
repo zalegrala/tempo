@@ -224,11 +224,19 @@ func (g *GroupingAggregator) Observe(span Span) {
 func (g *GroupingAggregator) labelsFor(vals FastValues) labels.Labels {
 	b := labels.NewBuilder(nil)
 
+	any := false
 	for i, v := range vals {
 		if v.Type != TypeNil {
 			b.Set(g.by[i].String(), v.EncodeToString(false))
+			any = true
 		}
 	}
+
+	if !any {
+		// Force at least 1 label or else this series is displayed weird
+		b.Set(g.by[0].String(), "<nil>")
+	}
+
 	return b.Labels()
 }
 
