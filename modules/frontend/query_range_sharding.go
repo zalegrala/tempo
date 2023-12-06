@@ -63,10 +63,17 @@ func newQueryRangeSharder(reader tempodb.Reader, o overrides.Interface, cfg Quer
 func (s queryRangeSharder) RoundTrip(r *http.Request) (*http.Response, error) {
 	now := time.Now()
 
+	var (
+		isProm        bool
+		err           error
+		queryRangeReq *tempopb.QueryRangeRequest
+		generatorReq  *http.Request
+		tenantID      string
+	)
+
 	// This route supports two flavors. (1) Prometheus-compatible (2) Tempo native
 	// Remember which flavor this is and swap it so all
 	// upstream calls are always Tempo native.
-	var isProm bool
 	if strings.Contains(r.RequestURI, api.PathPromQueryRange) {
 		isProm = true
 		// Swap upstream calls to the Tempo-native paths
@@ -77,29 +84,20 @@ func (s queryRangeSharder) RoundTrip(r *http.Request) (*http.Response, error) {
 		now = time.Unix(now.Unix(), 0)
 	}
 
-	searchReq, err := api.ParseQueryRangeRequest(r)
+	queryRangeReq, err = api.ParseQueryRangeRequest(r)
 	if err != nil {
-		return &http.Response{
-			StatusCode: http.StatusBadRequest,
-			Body:       io.NopCloser(strings.NewReader(err.Error())),
-		}, nil
+		return s.respErrHandler(isProm, err)
 	}
 
-	_, err = traceql.Parse(searchReq.Query)
+	_, err = traceql.Parse(queryRangeReq.Query)
 	if err != nil {
-		return &http.Response{
-			StatusCode: http.StatusBadRequest,
-			Body:       io.NopCloser(strings.NewReader(err.Error())),
-		}, nil
+		return s.respErrHandler(isProm, err)
 	}
 
 	ctx := r.Context()
-	tenantID, err := user.ExtractOrgID(ctx)
+	tenantID, err = user.ExtractOrgID(ctx)
 	if err != nil {
-		return &http.Response{
-			StatusCode: http.StatusBadRequest,
-			Body:       io.NopCloser(strings.NewReader(err.Error())),
-		}, nil
+		return s.respErrHandler(isProm, err)
 	}
 	span, ctx := opentracing.StartSpanFromContext(ctx, "frontend.QueryRangeSharder")
 	defer span.Finish()
@@ -109,14 +107,14 @@ func (s queryRangeSharder) RoundTrip(r *http.Request) (*http.Response, error) {
 
 	// calculate and enforce max search duration
 	maxDuration := s.maxDuration(tenantID)
-	if maxDuration != 0 && time.Duration(searchReq.End-searchReq.Start)*time.Second > maxDuration {
+	if maxDuration != 0 && time.Duration(queryRangeReq.End-queryRangeReq.Start)*time.Second > maxDuration {
 		return &http.Response{
 			StatusCode: http.StatusBadRequest,
-			Body:       io.NopCloser(strings.NewReader(fmt.Sprintf("range specified by start and end exceeds %s. received start=%d end=%d", maxDuration, searchReq.Start, searchReq.End))),
+			Body:       io.NopCloser(strings.NewReader(fmt.Sprintf("range specified by start and end exceeds %s. received start=%d end=%d", maxDuration, queryRangeReq.Start, queryRangeReq.End))),
 		}, nil
 	}
 
-	ingesterReq, err := s.generatorRequest(subCtx, tenantID, r, *searchReq)
+	generatorReq, err = s.generatorRequest(subCtx, tenantID, r, *queryRangeReq)
 	if err != nil {
 		return nil, err
 	}
@@ -125,11 +123,11 @@ func (s queryRangeSharder) RoundTrip(r *http.Request) (*http.Response, error) {
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 
-	if ingesterReq != nil {
-		reqCh <- &backendReqMsg{req: ingesterReq}
+	if generatorReq != nil {
+		reqCh <- &backendReqMsg{req: generatorReq}
 	}
 
-	err = s.backendRequests(subCtx, tenantID, r, searchReq, now, reqCh, stopCh)
+	err = s.backendRequests(subCtx, tenantID, r, queryRangeReq, now, reqCh, stopCh)
 	if err != nil {
 		return nil, err
 	}
@@ -425,6 +423,34 @@ func (s *queryRangeSharder) convertToPromFormat(resp *tempopb.QueryRangeResponse
 	}
 
 	return promResp
+}
+
+// returns an HTTP response or an error
+func (s *queryRangeSharder) respErrHandler(isProm bool, err error) (*http.Response, error) {
+	if isProm {
+		resp := s.convertToPromError(err)
+		_ = level.Debug(s.logger).Log("resp", fmt.Sprintf("%+v", resp))
+
+		bytes, marshalErr := json.Marshal(resp)
+		if marshalErr != nil {
+			return nil, fmt.Errorf("marshal failed with: %w: %w", marshalErr, err)
+		}
+		bodyString := string(bytes)
+
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header: http.Header{
+				api.HeaderContentType: {api.HeaderAcceptJSON},
+			},
+			Body:          io.NopCloser(strings.NewReader(bodyString)),
+			ContentLength: int64(len([]byte(bodyString))),
+		}, nil
+	}
+
+	return &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Body:       io.NopCloser(strings.NewReader(err.Error())),
+	}, nil
 }
 
 func (s *queryRangeSharder) convertToPromError(err error) PromResponse {
