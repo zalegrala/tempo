@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash"
+	"hash/fnv"
 	"time"
 
 	"github.com/prometheus/prometheus/model/labels"
@@ -366,19 +368,21 @@ func (e *Engine) CompileMetricsQueryRange(req *tempopb.QueryRangeRequest, dedupe
 		}
 	}
 
+	// Special optimization for queries like {} | rate() by (rootName)
+	// If first pass is only StartTime, then move any intrinsics to the first
+	// pass and try to avoid a second pass.  It's ok and beneficial to move
+	// intrinsics because they exist for every span and are never nil.
+	// But we can't move attributes because that changes the handling of nils.
+	// Moving attributes to the first pass is like asserting non-nil on them.
+	// TODO
+
 	if dedupeSpans {
-		spanID := NewIntrinsic(IntrinsicSpanID)
-		if !storageReq.HasAttribute(spanID) {
-			if storageReq.AllConditions {
-				// The most efficient case.  We can add it to the primary pass
-				// without affecting correctness. And this lets us avoid the
-				// entire second pass.
-				storageReq.Conditions = append(storageReq.Conditions, Condition{Attribute: spanID})
-			} else {
-				// Complex query with a second pass. In this case it is better to
-				// add it to the second pass so that it's only returned for the matches.
-				storageReq.SecondPassConditions = append(storageReq.SecondPassConditions, Condition{Attribute: spanID})
-			}
+		// We dedupe based on trace ID and start time.  Obviously this doesn't
+		// work if 2 spans have the same start time, but this doesn't impose any
+		// more data on the query when sharding is already present above (most cases)
+		traceID := NewIntrinsic(IntrinsicTraceID)
+		if !storageReq.HasAttribute(traceID) {
+			storageReq.Conditions = append(storageReq.Conditions, Condition{Attribute: traceID})
 		}
 	}
 
@@ -420,7 +424,7 @@ type MetricsEvalulator struct {
 	checkTime   bool
 	dedupeSpans bool
 	//deduper         *SpanBloomDeduper
-	deduper         *SpanDeduper
+	deduper         *SpanDeduper2
 	storageReq      *FetchSpansRequest
 	metricsPipeline metricsFirstStageElement
 	count           int
@@ -437,7 +441,7 @@ func (e *MetricsEvalulator) Do(ctx context.Context, f SpansetFetcher) error {
 	}
 
 	if e.dedupeSpans && e.deduper == nil {
-		e.deduper = NewSpanDeduper()
+		e.deduper = NewSpanDeduper2()
 		//e.deduper = NewSpanBloomDeduper()
 	}
 
@@ -460,7 +464,7 @@ func (e *MetricsEvalulator) Do(ctx context.Context, f SpansetFetcher) error {
 				}
 			}
 
-			if e.dedupeSpans && e.deduper.Skip(s.ID()) {
+			if e.dedupeSpans && e.deduper.Skip(ss.TraceID, s.StartTimeUnixNanos()) {
 				e.deduped++
 				continue
 			}
@@ -487,7 +491,7 @@ func (e *MetricsEvalulator) Results() (SeriesSet, error) {
 // performant.  We are effectively only using the bottom 5 bytes of
 // every span ID.  Byte [3] is used to select a sharded map and the
 // next 4 are the uint32 within that map. Is this good enough? Maybe... let's find out!
-type SpanDeduper struct {
+/*type SpanDeduper struct {
 	m []map[uint32]struct{}
 }
 
@@ -515,7 +519,7 @@ func (d *SpanDeduper) Skip(id []byte) bool {
 
 	m[v] = struct{}{}
 	return false
-}
+}*/
 
 /*
 // This dedupes span IDs using a chain of bloom filters.  I thought it
@@ -554,3 +558,46 @@ func (d *SpanBloomDeduper) Skip(id []byte) bool {
 
 	return false
 }*/
+
+// SpanDeduper2 is EXTREMELY LAZY. It attempts to dedupe spans for metrics
+// without requiring any new data fields.  It uses trace ID and span start time
+// which are already loaded. This of course terrible, but did I mention that
+// this is extremely lazy?  Additionally it uses sharded maps by the lowest byte
+// of the trace ID to reduce the pressure on any single map.  Maybe it's good enough.  Let's find out!
+type SpanDeduper2 struct {
+	m       []map[uint32]struct{}
+	h       hash.Hash32
+	buf     []byte
+	traceID Attribute
+}
+
+func NewSpanDeduper2() *SpanDeduper2 {
+	maps := make([]map[uint32]struct{}, 256)
+	for i := range maps {
+		maps[i] = make(map[uint32]struct{}, 1000)
+	}
+	return &SpanDeduper2{
+		m:       maps,
+		h:       fnv.New32a(),
+		buf:     make([]byte, 8),
+		traceID: NewIntrinsic(IntrinsicTraceID),
+	}
+}
+
+func (d *SpanDeduper2) Skip(tid []byte, startTime uint64) bool {
+
+	d.h.Reset()
+	d.h.Write([]byte(tid))
+	binary.BigEndian.PutUint64(d.buf, startTime)
+	d.h.Write(d.buf)
+
+	v := d.h.Sum32()
+	m := d.m[tid[len(tid)-1]]
+
+	if _, ok := m[v]; ok {
+		return true
+	}
+
+	m[v] = struct{}{}
+	return false
+}
