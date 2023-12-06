@@ -369,7 +369,16 @@ func (e *Engine) CompileMetricsQueryRange(req *tempopb.QueryRangeRequest, dedupe
 	if dedupeSpans {
 		spanID := NewIntrinsic(IntrinsicSpanID)
 		if !storageReq.HasAttribute(spanID) {
-			storageReq.SecondPassConditions = append(storageReq.SecondPassConditions, Condition{Attribute: spanID})
+			if storageReq.AllConditions {
+				// The most efficient case.  We can add it to the primary pass
+				// without affecting correctness. And this lets us avoid the
+				// entire second pass.
+				storageReq.Conditions = append(storageReq.Conditions, Condition{Attribute: spanID})
+			} else {
+				// Complex query with a second pass. In this case it is better to
+				// add it to the second pass so that it's only returned for the matches.
+				storageReq.SecondPassConditions = append(storageReq.SecondPassConditions, Condition{Attribute: spanID})
+			}
 		}
 	}
 
@@ -475,10 +484,9 @@ func (e *MetricsEvalulator) Results() (SeriesSet, error) {
 }
 
 // SpanDeduper using sharded maps in-memory.  So far this is the most
-// performant.  We store the lower 32-bits of every span ID in a map.
-// There are 256-maps sharded by the the first byte, so we are
-// only remembering 5 bytes of every 8-byte span ID.  Is this
-// good enough? Maybe... let's find out!
+// performant.  We are effectively only using the bottom 5 bytes of
+// every span ID.  Byte [3] is used to select a sharded map and the
+// next 4 are the uint32 within that map. Is this good enough? Maybe... let's find out!
 type SpanDeduper struct {
 	m []map[uint32]struct{}
 }
@@ -486,7 +494,7 @@ type SpanDeduper struct {
 func NewSpanDeduper() *SpanDeduper {
 	maps := make([]map[uint32]struct{}, 256)
 	for i := range maps {
-		maps[i] = make(map[uint32]struct{}, 1000)
+		maps[i] = make(map[uint32]struct{}, 25_000)
 	}
 	return &SpanDeduper{
 		m: maps,
@@ -498,7 +506,7 @@ func (d *SpanDeduper) Skip(id []byte) bool {
 		return false
 	}
 
-	m := d.m[id[0]]
+	m := d.m[id[3]]
 	v := binary.BigEndian.Uint32(id[4:8])
 
 	if _, ok := m[v]; ok {
