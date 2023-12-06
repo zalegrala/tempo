@@ -494,7 +494,7 @@ type SpanDeduper struct {
 func NewSpanDeduper() *SpanDeduper {
 	maps := make([]map[uint32]struct{}, 256)
 	for i := range maps {
-		maps[i] = make(map[uint32]struct{}, 25_000)
+		maps[i] = make(map[uint32]struct{}, 1000)
 	}
 	return &SpanDeduper{
 		m: maps,
