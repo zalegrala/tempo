@@ -13,6 +13,7 @@ import (
 	"github.com/golang/groupcache/lru"
 	"github.com/google/uuid"
 	gen "github.com/grafana/tempo/modules/generator/processor"
+	"github.com/grafana/tempo/pkg/boundedwaitgroup"
 	"github.com/grafana/tempo/pkg/model"
 	"github.com/grafana/tempo/pkg/tempopb"
 	"github.com/grafana/tempo/pkg/traceql"
@@ -22,6 +23,7 @@ import (
 	"github.com/grafana/tempo/tempodb/encoding"
 	"github.com/grafana/tempo/tempodb/encoding/common"
 	"github.com/grafana/tempo/tempodb/wal"
+	"go.uber.org/atomic"
 )
 
 const timeBuffer = 5 * time.Minute
@@ -415,6 +417,9 @@ func (p *Processor) QueryRange(ctx context.Context, req *tempopb.QueryRangeReque
 		return nil, err
 	}
 
+	wg := boundedwaitgroup.New(5)
+	jobErr := atomic.Error{}
+
 	for _, b := range blocks {
 
 		start := uint64(b.BlockMeta().StartTime.UnixNano())
@@ -424,15 +429,26 @@ func (p *Processor) QueryRange(ctx context.Context, req *tempopb.QueryRangeReque
 			continue
 		}
 
-		// TODO - caching
-		f := traceql.NewSpansetFetcherWrapper(func(ctx context.Context, req traceql.FetchSpansRequest) (traceql.FetchSpansResponse, error) {
-			return b.Fetch(ctx, req, common.DefaultSearchOptions())
-		})
+		wg.Add(1)
+		go func(b common.BackendBlock) {
+			defer wg.Done()
 
-		err = eval.Do(ctx, f)
-		if err != nil {
-			return nil, err
-		}
+			// TODO - caching
+			f := traceql.NewSpansetFetcherWrapper(func(ctx context.Context, req traceql.FetchSpansRequest) (traceql.FetchSpansResponse, error) {
+				return b.Fetch(ctx, req, common.DefaultSearchOptions())
+			})
+
+			err = eval.Do(ctx, f)
+			if err != nil {
+				jobErr.Store(err)
+			}
+		}(b)
+	}
+
+	wg.Wait()
+
+	if err := jobErr.Load(); err != nil {
+		return nil, err
 	}
 
 	return eval.Results()

@@ -8,11 +8,14 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/grafana/dskit/ring"
 	"github.com/grafana/dskit/user"
+	"github.com/grafana/tempo/pkg/boundedwaitgroup"
 	"github.com/grafana/tempo/pkg/tempopb"
 	v1 "github.com/grafana/tempo/pkg/tempopb/common/v1"
 	"github.com/grafana/tempo/pkg/traceql"
 	"github.com/grafana/tempo/pkg/util/log"
+	"github.com/grafana/tempo/tempodb/backend"
 	"github.com/grafana/tempo/tempodb/encoding/common"
+	"github.com/uber-go/atomic"
 )
 
 func (q *Querier) QueryRange(ctx context.Context, req *tempopb.QueryRangeRequest) (*tempopb.QueryRangeResponse, error) {
@@ -75,16 +78,28 @@ func (q *Querier) queryBackend(ctx context.Context, req *tempopb.QueryRangeReque
 		}
 	}
 
-	for _, m := range withinTimeRange {
-		f := traceql.NewSpansetFetcherWrapper(func(ctx context.Context, req traceql.FetchSpansRequest) (traceql.FetchSpansResponse, error) {
-			return q.store.Fetch(ctx, m, req, common.DefaultSearchOptions())
-		})
+	wg := boundedwaitgroup.New(2)
+	jobErr := atomic.Error{}
 
-		// TODO - span deduping
-		err = eval.Do(ctx, f)
-		if err != nil {
-			return nil, err
-		}
+	for _, m := range withinTimeRange {
+		wg.Add(1)
+		go func(m *backend.BlockMeta) {
+			defer wg.Done()
+			f := traceql.NewSpansetFetcherWrapper(func(ctx context.Context, req traceql.FetchSpansRequest) (traceql.FetchSpansResponse, error) {
+				return q.store.Fetch(ctx, m, req, common.DefaultSearchOptions())
+			})
+
+			// TODO handle error
+			err := eval.Do(ctx, f)
+			if err != nil {
+				jobErr.Store(err)
+			}
+		}(m)
+	}
+
+	wg.Wait()
+	if err := jobErr.Load(); err != nil {
+		return nil, err
 	}
 
 	res, err := eval.Results()
