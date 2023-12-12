@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash"
 	"hash/fnv"
+	"sync"
 	"time"
 
 	"github.com/prometheus/prometheus/model/labels"
@@ -394,6 +395,8 @@ func (e *Engine) CompileMetricsQueryRange(req *tempopb.QueryRangeRequest, dedupe
 	//storageReq.EndTimeUnixNanos = req.End // Should this be exclusive?
 	// (2) Only include spans that started in this time frame.
 	//     This is checked inside the evaluator
+	storageReq.StartTimeUnixNanos = req.Start
+	storageReq.EndTimeUnixNanos = req.End
 	me.checkTime = true
 	me.start = req.Start
 	me.end = req.End
@@ -429,6 +432,7 @@ type MetricsEvalulator struct {
 	metricsPipeline metricsFirstStageElement
 	count           int
 	deduped         int
+	mtx             sync.Mutex
 }
 
 func (e *MetricsEvalulator) Do(ctx context.Context, f SpansetFetcher) error {
@@ -464,13 +468,16 @@ func (e *MetricsEvalulator) Do(ctx context.Context, f SpansetFetcher) error {
 				}
 			}
 
+			e.mtx.Lock()
 			if e.dedupeSpans && e.deduper.Skip(ss.TraceID, s.StartTimeUnixNanos()) {
 				e.deduped++
+				e.mtx.Unlock()
 				continue
 			}
 
 			e.count++
 			e.metricsPipeline.observe(s)
+			e.mtx.Unlock()
 		}
 
 		ss.Release()
