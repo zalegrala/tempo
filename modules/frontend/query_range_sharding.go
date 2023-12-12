@@ -67,7 +67,7 @@ func (s queryRangeSharder) RoundTrip(r *http.Request) (*http.Response, error) {
 		isProm        bool
 		err           error
 		queryRangeReq *tempopb.QueryRangeRequest
-		generatorReq  *http.Request
+		generatorReq  *queryRangeJob
 		tenantID      string
 	)
 
@@ -114,20 +114,20 @@ func (s queryRangeSharder) RoundTrip(r *http.Request) (*http.Response, error) {
 		}, nil
 	}
 
-	generatorReq, err = s.generatorRequest(subCtx, tenantID, r, *queryRangeReq)
+	generatorReq, err = s.generatorRequest(*queryRangeReq)
 	if err != nil {
 		return nil, err
 	}
 
-	reqCh := make(chan *backendReqMsg, 1) // buffer of 1 allows us to insert ingestReq if it exists
+	reqCh := make(chan *queryRangeJob, 1) // buffer of 1 allows us to insert ingestReq if it exists
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 
 	if generatorReq != nil {
-		reqCh <- &backendReqMsg{req: generatorReq}
+		reqCh <- generatorReq
 	}
 
-	err = s.backendRequests(subCtx, tenantID, r, queryRangeReq, now, reqCh, stopCh)
+	err = s.backendRequests(tenantID, queryRangeReq, now, reqCh, stopCh)
 	if err != nil {
 		return nil, err
 	}
@@ -137,18 +137,19 @@ func (s queryRangeSharder) RoundTrip(r *http.Request) (*http.Response, error) {
 	mtx := sync.Mutex{}
 
 	startedReqs := 0
-	for req := range reqCh {
-		if req.err != nil {
-			return nil, fmt.Errorf("unexpected err building reqs: %w", req.err)
+	for job := range reqCh {
+		if job.err != nil {
+			return nil, fmt.Errorf("unexpected err building reqs: %w", job.err)
 		}
 
 		// When we hit capacity of boundedwaitgroup, wg.Add will block
 		wg.Add(1)
 		startedReqs++
 
-		go func(innerR *http.Request) {
+		go func(job *queryRangeJob) {
 			defer wg.Done()
 
+			innerR := s.toUpstreamRequest(subCtx, job.req, r, tenantID)
 			resp, err := s.next.RoundTrip(innerR)
 			if err != nil {
 				// context cancelled error happens when we exit early.
@@ -188,7 +189,7 @@ func (s queryRangeSharder) RoundTrip(r *http.Request) (*http.Response, error) {
 			mtx.Lock()
 			defer mtx.Unlock()
 			c.Combine(results.Series)
-		}(req.req)
+		}(job)
 	}
 
 	// wait for all goroutines running in wg to finish or cancelled
@@ -241,7 +242,7 @@ func (s *queryRangeSharder) blockMetas(start, end int64, tenantID string) []*bac
 	return metas
 }
 
-func (s *queryRangeSharder) backendRequests(ctx context.Context, tenantID string, parent *http.Request, searchReq *tempopb.QueryRangeRequest, now time.Time, reqCh chan *backendReqMsg, stopCh <-chan struct{}) error {
+func (s *queryRangeSharder) backendRequests(tenantID string, searchReq *tempopb.QueryRangeRequest, now time.Time, reqCh chan *queryRangeJob, stopCh <-chan struct{}) error {
 
 	// request without start or end, search only in generator
 	if searchReq.Start == 0 || searchReq.End == 0 {
@@ -264,13 +265,13 @@ func (s *queryRangeSharder) backendRequests(ctx context.Context, tenantID string
 	}
 
 	go func() {
-		s.buildBackendRequests(ctx, tenantID, parent, searchReq, start, end, reqCh, stopCh)
+		s.buildBackendRequests(tenantID, searchReq, start, end, reqCh, stopCh)
 	}()
 
 	return nil
 }
 
-func (s *queryRangeSharder) buildBackendRequests(ctx context.Context, tenantID string, parent *http.Request, searchReq *tempopb.QueryRangeRequest, start, end uint64, reqCh chan *backendReqMsg, stopCh <-chan struct{}) {
+func (s *queryRangeSharder) buildBackendRequests(tenantID string, searchReq *tempopb.QueryRangeRequest, start, end uint64, reqCh chan *queryRangeJob, stopCh <-chan struct{}) {
 	defer close(reqCh)
 
 	timeWindowSize := uint64(s.cfg.Interval.Nanoseconds())
@@ -303,13 +304,8 @@ func (s *queryRangeSharder) buildBackendRequests(ctx context.Context, tenantID s
 			shardR.Shard = uint32(i)
 			shardR.Of = uint32(shards)
 
-			subR := parent.Clone(ctx)
-			subR.Header.Set(user.OrgIDHeaderName, tenantID)
-			subR = api.BuildQueryRangeRequest(subR, &shardR)
-			subR.RequestURI = buildUpstreamRequestURI(parent.URL.Path, subR.URL.Query())
-
 			select {
-			case reqCh <- &backendReqMsg{req: subR}:
+			case reqCh <- &queryRangeJob{req: shardR}:
 			case <-stopCh:
 				return
 			}
@@ -334,7 +330,7 @@ func (s *queryRangeSharder) backendRange(now time.Time, start, end uint64, query
 	return start, end
 }
 
-func (s *queryRangeSharder) generatorRequest(ctx context.Context, tenantID string, parent *http.Request, searchReq tempopb.QueryRangeRequest) (*http.Request, error) {
+func (s *queryRangeSharder) generatorRequest(searchReq tempopb.QueryRangeRequest) (*queryRangeJob, error) {
 
 	now := time.Now()
 	cutoff := uint64(now.Add(-s.cfg.QueryBackendAfter).UnixNano())
@@ -353,15 +349,20 @@ func (s *queryRangeSharder) generatorRequest(ctx context.Context, tenantID strin
 		return nil, nil
 	}
 
-	subR := parent.Clone(ctx)
-	subR.Header.Set(user.OrgIDHeaderName, tenantID)
 	// Shard 0 indicates generator request
 	searchReq.Shard = 0
 	searchReq.Of = 0
-	subR = api.BuildQueryRangeRequest(subR, &searchReq)
-	subR.RequestURI = buildUpstreamRequestURI(subR.URL.Path, subR.URL.Query())
+	return &queryRangeJob{
+		req: searchReq,
+	}, nil
+}
 
-	return subR, nil
+func (s *queryRangeSharder) toUpstreamRequest(ctx context.Context, req tempopb.QueryRangeRequest, parent *http.Request, tenantID string) *http.Request {
+	subR := parent.Clone(ctx)
+	subR.Header.Set(user.OrgIDHeaderName, tenantID)
+	subR = api.BuildQueryRangeRequest(subR, &req)
+	subR.RequestURI = buildUpstreamRequestURI(parent.URL.Path, subR.URL.Query())
+	return subR
 }
 
 // maxDuration returns the max search duration allowed for this tenant.
@@ -477,4 +478,9 @@ type PromResult struct {
 	Metric    map[string]string `json:"metric"`
 	Values    []interface{}     `json:"values"`    // first entry is timestamp (float), second is value (string)
 	Exemplars []interface{}     `json:"exemplars"` // first entry is timestamp (float), second is duration (float seconds), third is traceID (string)
+}
+
+type queryRangeJob struct {
+	req tempopb.QueryRangeRequest
+	err error
 }
