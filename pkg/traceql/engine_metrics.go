@@ -395,8 +395,6 @@ func (e *Engine) CompileMetricsQueryRange(req *tempopb.QueryRangeRequest, dedupe
 	//storageReq.EndTimeUnixNanos = req.End // Should this be exclusive?
 	// (2) Only include spans that started in this time frame.
 	//     This is checked inside the evaluator
-	storageReq.StartTimeUnixNanos = req.Start
-	storageReq.EndTimeUnixNanos = req.End
 	me.checkTime = true
 	me.start = req.Start
 	me.end = req.End

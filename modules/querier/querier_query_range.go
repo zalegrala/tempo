@@ -15,6 +15,7 @@ import (
 	"github.com/grafana/tempo/pkg/util/log"
 	"github.com/grafana/tempo/tempodb/backend"
 	"github.com/grafana/tempo/tempodb/encoding/common"
+	"github.com/opentracing/opentracing-go"
 	"github.com/uber-go/atomic"
 )
 
@@ -85,12 +86,19 @@ func (q *Querier) queryBackend(ctx context.Context, req *tempopb.QueryRangeReque
 		wg.Add(1)
 		go func(m *backend.BlockMeta) {
 			defer wg.Done()
+
+			span, ctx2 := opentracing.StartSpanFromContext(ctx, "querier.queryBackEnd.Block", opentracing.Tags{
+				"block":     m.BlockID.String(),
+				"blockSize": m.Size,
+			})
+			defer span.Finish()
+
 			f := traceql.NewSpansetFetcherWrapper(func(ctx context.Context, req traceql.FetchSpansRequest) (traceql.FetchSpansResponse, error) {
 				return q.store.Fetch(ctx, m, req, common.DefaultSearchOptions())
 			})
 
 			// TODO handle error
-			err := eval.Do(ctx, f)
+			err := eval.Do(ctx2, f)
 			if err != nil {
 				jobErr.Store(err)
 			}

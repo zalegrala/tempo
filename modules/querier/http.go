@@ -356,6 +356,12 @@ func (q *Querier) QueryRangeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	span.SetTag("query", req.Query)
+	span.SetTag("shard", req.Shard)
+	span.SetTag("of", req.Of)
+	span.SetTag("step", time.Duration(req.Step))
+	span.SetTag("interval", time.Unix(0, int64(req.End)).Sub(time.Unix(0, int64(req.Start))))
+
 	resp, err = q.QueryRange(ctx, req)
 	if err != nil {
 		errHandler(ctx, span, err)
