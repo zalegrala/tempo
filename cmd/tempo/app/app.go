@@ -471,8 +471,9 @@ func (t *App) writeStatusServices(w io.Writer) error {
 
 func (t *App) writeStatusEndpoints(w io.Writer) error {
 	type endpoint struct {
-		name  string
-		regex string
+		name    string
+		regex   string
+		methods []string
 	}
 
 	endpoints := []endpoint{}
@@ -490,6 +491,11 @@ func (t *App) writeStatusEndpoints(w io.Writer) error {
 			e.regex = pathRegexp
 		}
 
+		methods, err := route.GetMethods()
+		if err == nil {
+			e.methods = methods
+		}
+
 		endpoints = append(endpoints, e)
 
 		return nil
@@ -504,11 +510,11 @@ func (t *App) writeStatusEndpoints(w io.Writer) error {
 
 	x := table.NewWriter()
 	x.SetOutputMirror(w)
-	x.AppendHeader(table.Row{"name", "regex"})
+	x.AppendHeader(table.Row{"name", "regex", "methods"})
 
 	for _, e := range endpoints {
 		x.AppendRows([]table.Row{
-			{e.name, e.regex},
+			{e.name, e.regex, e.methods},
 		})
 	}
 
