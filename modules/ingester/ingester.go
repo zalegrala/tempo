@@ -12,8 +12,6 @@ import (
 	"github.com/grafana/dskit/ring"
 	"github.com/grafana/dskit/services"
 	"github.com/grafana/dskit/user"
-	"github.com/opentracing/opentracing-go"
-	ot_log "github.com/opentracing/opentracing-go/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/atomic"
@@ -30,6 +28,9 @@ import (
 	"github.com/grafana/tempo/pkg/validation"
 	"github.com/grafana/tempo/tempodb/backend"
 	"github.com/grafana/tempo/tempodb/backend/local"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -45,6 +46,7 @@ var metricFlushQueueLength = promauto.NewGauge(prometheus.GaugeOpts{
 
 const (
 	ingesterRingKey = "ring"
+	module          = "ingester"
 )
 
 // Ingester builds blocks out of incoming traces
@@ -68,6 +70,7 @@ type Ingester struct {
 	limiter *Limiter
 
 	overrides ingesterOverrides
+	tracer    trace.Tracer
 
 	subservicesWatcher *services.FailureWatcher
 }
@@ -81,6 +84,7 @@ func New(cfg Config, store storage.Store, overrides overrides.Interface, reg pro
 		flushQueues:  flushqueues.New(cfg.ConcurrentFlushes, metricFlushQueueLength),
 		replayJitter: true,
 		overrides:    overrides,
+		tracer:       otel.Tracer(module),
 	}
 
 	i.pushErr.Store(ErrStarting)
@@ -264,9 +268,8 @@ func (i *Ingester) FindTraceByID(ctx context.Context, req *tempopb.TraceByIDRequ
 		return nil, fmt.Errorf("invalid trace id")
 	}
 
-	// tracing instrumentation
-	span, ctx := opentracing.StartSpanFromContext(ctx, "Ingester.FindTraceByID")
-	defer span.Finish()
+	ctx, span := i.tracer.Start(ctx, "Ingester.FindTraceByID")
+	defer span.End()
 
 	instanceID, err := user.ExtractOrgID(ctx)
 	if err != nil {
@@ -282,7 +285,7 @@ func (i *Ingester) FindTraceByID(ctx context.Context, req *tempopb.TraceByIDRequ
 		return nil, err
 	}
 
-	span.LogFields(ot_log.Bool("trace found", trace != nil))
+	span.SetAttributes(attribute.Bool("trace found", trace != nil))
 
 	return &tempopb.TraceByIDResponse{
 		Trace: trace,

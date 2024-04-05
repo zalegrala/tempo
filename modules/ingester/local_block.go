@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
 
 	"github.com/grafana/tempo/pkg/tempopb"
@@ -12,7 +14,6 @@ import (
 	"github.com/grafana/tempo/tempodb/backend/local"
 	"github.com/grafana/tempo/tempodb/encoding"
 	"github.com/grafana/tempo/tempodb/encoding/common"
-	"github.com/opentracing/opentracing-go"
 )
 
 const nameFlushed = "flushed"
@@ -25,6 +26,7 @@ type localBlock struct {
 	writer backend.Writer
 
 	flushedTime atomic.Int64 // protecting flushedTime b/c it's accessed from the store on flush and from the ingester instance checking flush time
+	tracer      trace.Tracer
 }
 
 var _ common.Finder = (*localBlock)(nil)
@@ -35,6 +37,7 @@ func newLocalBlock(ctx context.Context, existingBlock common.BackendBlock, l *lo
 		BackendBlock: existingBlock,
 		reader:       backend.NewReader(l),
 		writer:       backend.NewWriter(l),
+		tracer:       otel.Tracer(module),
 	}
 
 	flushedBytes, err := c.reader.Read(ctx, nameFlushed, c.BlockMeta().BlockID, c.BlockMeta().TenantID, nil)
@@ -50,8 +53,8 @@ func newLocalBlock(ctx context.Context, existingBlock common.BackendBlock, l *lo
 }
 
 func (c *localBlock) FindTraceByID(ctx context.Context, id common.ID, opts common.SearchOptions) (*tempopb.Trace, error) {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "localBlock.FindTraceByID")
-	defer span.Finish()
+	ctx, span := c.tracer.Start(ctx, "localBlock.FindTraceByID")
+	defer span.End()
 	return c.BackendBlock.FindTraceByID(ctx, id, opts)
 }
 

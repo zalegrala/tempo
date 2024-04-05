@@ -15,7 +15,6 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/gogo/status"
 	"github.com/google/uuid"
-	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/atomic"
@@ -32,6 +31,9 @@ import (
 	"github.com/grafana/tempo/tempodb/backend/local"
 	"github.com/grafana/tempo/tempodb/encoding"
 	"github.com/grafana/tempo/tempodb/encoding/common"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -113,6 +115,8 @@ type instance struct {
 	hash hash.Hash32
 
 	autocompleteFilteringEnabled bool
+
+	tracer oteltrace.Tracer
 }
 
 func newInstance(instanceID string, limiter *Limiter, overrides ingesterOverrides, writer tempodb.Writer, l *local.Backend, autocompleteFiltering bool, dedicatedColumns backend.DedicatedColumns) (*instance, error) {
@@ -136,6 +140,8 @@ func newInstance(instanceID string, limiter *Limiter, overrides ingesterOverride
 		hash: fnv.New32(),
 
 		autocompleteFilteringEnabled: autocompleteFiltering,
+
+		tracer: otel.Tracer(module, oteltrace.WithInstrumentationAttributes(attribute.String("tenant", instanceID))),
 	}
 	err := i.resetHeadBlock()
 	if err != nil {
@@ -410,8 +416,8 @@ func (i *instance) ClearFlushedBlocks(completeBlockTimeout time.Duration) error 
 }
 
 func (i *instance) FindTraceByID(ctx context.Context, id []byte) (*tempopb.Trace, error) {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "instance.FindTraceByID")
-	defer span.Finish()
+	ctx, span := i.tracer.Start(ctx, "instance.FindTraceByID")
+	defer span.End()
 
 	var err error
 	var completeTrace *tempopb.Trace
