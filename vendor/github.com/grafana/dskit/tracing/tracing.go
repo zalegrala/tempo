@@ -145,7 +145,6 @@ func InstallOpenTelemetryTracer(config Config, logger *slog.Logger, appName, ver
 		sdktrace.WithResource(res),
 		sdktrace.WithSpanProcessor(bsp),
 	)
-	otel.SetTracerProvider(tracerProvider)
 
 	// set global propagator to tracecontext (the default is no-op).
 	otel.SetTextMapPropagator(
@@ -160,6 +159,17 @@ func InstallOpenTelemetryTracer(config Config, logger *slog.Logger, appName, ver
 			os.Exit(1)
 		}
 	}
+
+	/* if config.InstallOTBridge { */
+	/* 	otelTracer := tracerProvider.Tracer("tracer_name") */
+	/* 	// Use the bridgeTracer as your OpenTracing tracer. */
+	/* 	bridgeTracer, wrapperTracerProvider := otelBridge.NewTracerPair(otelTracer) */
+	/* 	// Set the wrapperTracerProvider as the global OpenTelemetry */
+	/* 	// TracerProvider so instrumentation will use it by default. */
+	/* 	otel.SetTracerProvider(wrapperTracerProvider) */
+	/* } else { */
+	/* 	otel.SetTracerProvider(tracerProvider) */
+	/* } */
 
 	return shutdown, nil
 }

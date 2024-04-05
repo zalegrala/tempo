@@ -72,10 +72,9 @@ require (
 	go.opentelemetry.io/collector/receiver/otlpreceiver v0.97.1-0.20240327165504-2b0decfcebeb
 	go.opentelemetry.io/collector/semconv v0.97.0
 	go.opentelemetry.io/otel v1.25.0
-	go.opentelemetry.io/otel/bridge/opencensus v1.23.1
-	go.opentelemetry.io/otel/bridge/opentracing v1.21.0
+	go.opentelemetry.io/otel/bridge/opencensus v1.23.1 // indirect
 	go.opentelemetry.io/otel/metric v1.25.0
-	go.opentelemetry.io/otel/sdk v1.25.0
+	go.opentelemetry.io/otel/sdk v1.25.0 // indirect
 	go.opentelemetry.io/otel/trace v1.25.0
 	go.uber.org/atomic v1.11.0
 	go.uber.org/goleak v1.3.0
@@ -117,6 +116,7 @@ require (
 	go.opentelemetry.io/collector/otelcol v0.95.0
 	go.opentelemetry.io/collector/processor v0.97.0
 	go.opentelemetry.io/collector/receiver v0.97.0
+	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.49.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.25.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.24.0
 	go.opentelemetry.io/proto/otlp v1.1.0
@@ -317,7 +317,6 @@ require (
 	go.opentelemetry.io/collector/featuregate v1.4.0 // indirect
 	go.opentelemetry.io/collector/service v0.95.0 // indirect
 	go.opentelemetry.io/contrib/config v0.4.0 // indirect
-	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.49.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.49.0 // indirect
 	go.opentelemetry.io/contrib/propagators/b3 v1.23.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.23.1 // indirect
