@@ -4,8 +4,11 @@ import (
 	"context"
 	"time"
 
-	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/prometheus/util/strutil"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/prometheus/client_golang/prometheus"
 
 	gen "github.com/grafana/tempo/modules/generator/processor"
 	processor_util "github.com/grafana/tempo/modules/generator/processor/util"
@@ -15,7 +18,6 @@ import (
 	v1 "github.com/grafana/tempo/pkg/tempopb/resource/v1"
 	v1_trace "github.com/grafana/tempo/pkg/tempopb/trace/v1"
 	tempo_util "github.com/grafana/tempo/pkg/util"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
@@ -23,6 +25,7 @@ const (
 	metricDurationSeconds = "traces_spanmetrics_latency"
 	metricSizeTotal       = "traces_spanmetrics_size_total"
 	targetInfo            = "traces_target_info"
+	processor             = "spanmetrics"
 )
 
 type Processor struct {
@@ -41,6 +44,8 @@ type Processor struct {
 
 	// for testing
 	now func() time.Time
+
+	tracer trace.Tracer
 }
 
 func New(cfg Config, registry registry.Registry, spanDiscardCounter prometheus.Counter) (gen.Processor, error) {
@@ -77,6 +82,7 @@ func New(cfg Config, registry registry.Registry, spanDiscardCounter prometheus.C
 		now:                   time.Now,
 		labels:                labels,
 		filteredSpansCounter:  spanDiscardCounter,
+		tracer:                otel.Tracer(processor),
 	}
 
 	if cfg.Subprocessors[Latency] {
@@ -104,8 +110,8 @@ func (p *Processor) Name() string {
 }
 
 func (p *Processor) PushSpans(ctx context.Context, req *tempopb.PushSpansRequest) {
-	span, _ := opentracing.StartSpanFromContext(ctx, "spanmetrics.PushSpans")
-	defer span.Finish()
+	_, span := p.tracer.Start(ctx, "spanmetrics.PushSpans")
+	defer span.End()
 
 	p.aggregateMetrics(req.Batches)
 }

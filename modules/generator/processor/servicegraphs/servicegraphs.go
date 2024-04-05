@@ -10,12 +10,13 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/prometheus/util/strutil"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	semconv "go.opentelemetry.io/otel/semconv/v1.18.0"
+	"go.opentelemetry.io/otel/trace"
 
 	gen "github.com/grafana/tempo/modules/generator/processor"
 	"github.com/grafana/tempo/modules/generator/processor/servicegraphs/store"
@@ -50,6 +51,7 @@ const (
 	metricRequestFailedTotal   = "traces_service_graph_request_failed_total"
 	metricRequestServerSeconds = "traces_service_graph_request_server_seconds"
 	metricRequestClientSeconds = "traces_service_graph_request_client_seconds"
+	processor                  = "spanmetrics"
 )
 
 var defaultPeerAttributes = []attribute.Key{
@@ -82,6 +84,7 @@ type Processor struct {
 	metricTotalEdges   prometheus.Counter
 	metricExpiredEdges prometheus.Counter
 	logger             log.Logger
+	tracer             trace.Tracer
 }
 
 func New(cfg Config, tenant string, registry registry.Registry, logger log.Logger) gen.Processor {
@@ -109,6 +112,7 @@ func New(cfg Config, tenant string, registry registry.Registry, logger log.Logge
 		metricTotalEdges:   metricTotalEdges.WithLabelValues(tenant),
 		metricExpiredEdges: metricExpiredEdges.WithLabelValues(tenant),
 		logger:             log.With(logger, "component", "service-graphs"),
+		tracer:             otel.Tracer(processor),
 	}
 
 	p.store = store.NewStore(cfg.Wait, cfg.MaxItems, p.onComplete, p.onExpire)
@@ -137,8 +141,8 @@ func (p *Processor) Name() string {
 }
 
 func (p *Processor) PushSpans(ctx context.Context, req *tempopb.PushSpansRequest) {
-	span, _ := opentracing.StartSpanFromContext(ctx, "servicegraphs.PushSpans")
-	defer span.Finish()
+	ctx, span := p.tracer.Start(ctx, "servicegraphs.PushSpans")
+	defer span.End()
 
 	if err := p.consume(req.Batches); err != nil {
 		var tmsErr *tooManySpansError

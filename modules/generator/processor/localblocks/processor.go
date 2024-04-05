@@ -12,7 +12,9 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/golang/groupcache/lru"
 	"github.com/google/uuid"
-	"github.com/opentracing/opentracing-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
 
 	gen "github.com/grafana/tempo/modules/generator/processor"
@@ -29,7 +31,10 @@ import (
 	"github.com/grafana/tempo/tempodb/wal"
 )
 
-const timeBuffer = 5 * time.Minute
+const (
+	timeBuffer = 5 * time.Minute
+	processor  = "localblocks"
+)
 
 // ProcessorOverrides is just the set of overrides needed here.
 type ProcessorOverrides interface {
@@ -58,6 +63,7 @@ type Processor struct {
 	liveTracesMtx sync.Mutex
 	liveTraces    *liveTraces
 	traceSizes    *traceSizes
+	tracer        trace.Tracer
 }
 
 var _ gen.Processor = (*Processor)(nil)
@@ -88,6 +94,7 @@ func New(cfg Config, tenant string, wal *wal.WAL, overrides ProcessorOverrides) 
 		closeCh:        make(chan struct{}),
 		wg:             sync.WaitGroup{},
 		cache:          lru.New(100),
+		tracer:         otel.Tracer(processor),
 	}
 
 	err = p.reloadBlocks()
@@ -495,11 +502,11 @@ func (p *Processor) QueryRange(ctx context.Context, req *tempopb.QueryRangeReque
 
 			m := b.BlockMeta()
 
-			span, ctx := opentracing.StartSpanFromContext(ctx, "Processor.QueryRange.Block", opentracing.Tags{
-				"block":     m.BlockID,
-				"blockSize": m.Size,
-			})
-			defer span.Finish()
+			_, span := p.tracer.Start(ctx, "Processor.QueryRange.Block", trace.WithAttributes(
+				attribute.String("block", m.BlockID.String()),
+				attribute.Int64("blockSize", int64(m.Size)),
+			))
+			defer span.End()
 
 			// TODO - caching
 			f := traceql.NewSpansetFetcherWrapper(func(ctx context.Context, req traceql.FetchSpansRequest) (traceql.FetchSpansResponse, error) {

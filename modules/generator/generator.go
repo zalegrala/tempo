@@ -14,8 +14,10 @@ import (
 	"github.com/grafana/dskit/ring"
 	"github.com/grafana/dskit/services"
 	"github.com/grafana/dskit/user"
-	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
 
 	"github.com/grafana/tempo/modules/generator/storage"
@@ -31,6 +33,8 @@ const (
 	// We use a safe default instead of exposing to config option to the user
 	// in order to simplify the config.
 	ringNumTokens = 256
+
+	module = "generator"
 )
 
 var (
@@ -58,6 +62,7 @@ type Generator struct {
 
 	reg    prometheus.Registerer
 	logger log.Logger
+	tracer trace.Tracer
 }
 
 // New makes a new Generator.
@@ -79,6 +84,7 @@ func New(cfg *Config, overrides metricsGeneratorOverrides, reg prometheus.Regist
 
 		reg:    reg,
 		logger: logger,
+		tracer: otel.Tracer(module),
 	}
 
 	// Lifecycler and ring
@@ -189,14 +195,14 @@ func (g *Generator) PushSpans(ctx context.Context, req *tempopb.PushSpansRequest
 		return nil, ErrReadOnly
 	}
 
-	span, ctx := opentracing.StartSpanFromContext(ctx, "generator.PushSpans")
-	defer span.Finish()
+	ctx, span := g.tracer.Start(ctx, "Generator.PushSpans")
+	defer span.End()
 
 	instanceID, err := user.ExtractOrgID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	span.SetTag("instanceID", instanceID)
+	span.SetAttributes(attribute.String("instanceID", instanceID))
 
 	instance, err := g.getOrCreateInstance(instanceID)
 	if err != nil {

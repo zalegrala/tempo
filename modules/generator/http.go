@@ -6,7 +6,8 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/jsonpb"
-	"github.com/opentracing/opentracing-go"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/grafana/tempo/pkg/api"
 	"github.com/grafana/tempo/pkg/tempopb"
@@ -16,10 +17,10 @@ func (g *Generator) SpanMetricsHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithDeadline(r.Context(), time.Now().Add(g.cfg.QueryTimeout))
 	defer cancel()
 
-	span, ctx := opentracing.StartSpanFromContext(ctx, "Generator.SpanMetricsHandler")
-	defer span.Finish()
-
-	span.SetTag("requestURI", r.RequestURI)
+	ctx, span := g.tracer.Start(ctx, "Generator.SpanMetricsHandler",
+		trace.WithAttributes(attribute.String("requestURI", r.RequestURI)),
+	)
+	defer span.End()
 
 	req, err := api.ParseSpanMetricsRequest(r)
 	if err != nil {
@@ -47,10 +48,10 @@ func (g *Generator) QueryRangeHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithDeadline(r.Context(), time.Now().Add(g.cfg.QueryTimeout))
 	defer cancel()
 
-	span, ctx := opentracing.StartSpanFromContext(ctx, "Generator.QueryRangeHandler")
-	defer span.Finish()
-
-	span.SetTag("requestURI", r.RequestURI)
+	ctx, span := g.tracer.Start(ctx, "Generator.QueryRangeHandler",
+		trace.WithAttributes(attribute.String("requestURI", r.RequestURI)),
+	)
+	defer span.End()
 
 	req, err := api.ParseQueryRangeRequest(r)
 	if err != nil {
