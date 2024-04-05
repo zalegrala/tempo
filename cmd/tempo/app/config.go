@@ -8,6 +8,7 @@ import (
 	"github.com/grafana/dskit/flagext"
 	"github.com/grafana/dskit/kv/memberlist"
 	"github.com/grafana/dskit/server"
+	"github.com/grafana/dskit/tracing"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/grafana/tempo/modules/cache"
@@ -56,6 +57,7 @@ type Config struct {
 	MemberlistKV    memberlist.KVConfig     `yaml:"memberlist,omitempty"`
 	UsageReport     usagestats.Config       `yaml:"usage_report,omitempty"`
 	CacheProvider   cache.Config            `yaml:"cache,omitempty"`
+	Tracing         tracing.Config          `yaml:"tracing,omitempty"`
 }
 
 func newDefaultConfig() *Config {
@@ -123,6 +125,7 @@ func (c *Config) RegisterFlagsAndApplyDefaults(prefix string, f *flag.FlagSet) {
 	flagext.DefaultValues(&c.GeneratorClient)
 	c.GeneratorClient.GRPCClientConfig.GRPCCompression = "snappy"
 	c.Overrides.RegisterFlagsAndApplyDefaults(f)
+	c.Tracing.RegisterFlagsAndApplyDefaults(util.PrefixConfig(prefix, "tracing"), f)
 
 	c.Distributor.RegisterFlagsAndApplyDefaults(util.PrefixConfig(prefix, "distributor"), f)
 	c.Ingester.RegisterFlagsAndApplyDefaults(util.PrefixConfig(prefix, "ingester"), f)
