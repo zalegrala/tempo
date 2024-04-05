@@ -108,7 +108,7 @@ func InstallOpenTelemetryTracer(config Config, logger *slog.Logger, appName, ver
 
 	ctx := context.Background()
 
-	res, err := resource.New(context.Background(),
+	res, err := resource.New(ctx,
 		resource.WithAttributes(
 			semconv.ServiceNameKey.String(appName),
 			semconv.ServiceVersionKey.String(version),
@@ -121,7 +121,7 @@ func InstallOpenTelemetryTracer(config Config, logger *slog.Logger, appName, ver
 
 	dialOpts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		/* grpc.WithBlock(), */
+		grpc.WithBlock(),
 	}
 
 	conn, err := grpc.NewClient(config.OtelEndpoint, dialOpts...)
@@ -151,6 +151,8 @@ func InstallOpenTelemetryTracer(config Config, logger *slog.Logger, appName, ver
 		propagation.NewCompositeTextMapPropagator(propagation.Baggage{}, propagation.TraceContext{}),
 	)
 
+	otel.SetTracerProvider(tracerProvider)
+
 	shutdown := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -168,7 +170,6 @@ func InstallOpenTelemetryTracer(config Config, logger *slog.Logger, appName, ver
 	/* 	// TracerProvider so instrumentation will use it by default. */
 	/* 	otel.SetTracerProvider(wrapperTracerProvider) */
 	/* } else { */
-	/* 	otel.SetTracerProvider(tracerProvider) */
 	/* } */
 
 	return shutdown, nil
