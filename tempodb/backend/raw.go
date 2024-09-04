@@ -249,7 +249,7 @@ func (r *reader) TenantIndex(ctx context.Context, tenantID string) (*TenantIndex
 	tenantIndex := &TenantIndex{}
 	err = tenantIndex.fromProto(tenantIndexProto)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed converting from proto: %w", err)
 	}
 
 	return tenantIndex, nil
@@ -266,8 +266,6 @@ func (r *reader) Shutdown() {
 }
 
 func (r *reader) tenantIndexProto(ctx context.Context, tenantID string) (*backend_v1.TenantIndex, error) {
-	tenantIndexMessage := &backend_v1.TenantIndex{}
-
 	reader, size, err := r.r.Read(ctx, TenantIndexNameProto, KeyPath([]string{tenantID}), nil)
 	if err != nil {
 		return nil, err
@@ -279,6 +277,7 @@ func (r *reader) tenantIndexProto(ctx context.Context, tenantID string) (*backen
 		return nil, err
 	}
 
+	tenantIndexMessage := &backend_v1.TenantIndex{}
 	err = proto.Unmarshal(bytes, tenantIndexMessage)
 	if err == nil {
 		return tenantIndexMessage, nil
