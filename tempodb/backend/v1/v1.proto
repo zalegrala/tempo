@@ -28,7 +28,8 @@ message BlockMeta {
     uint32 bloom_shard_count = 15;
     uint32 footer_size = 16;
     // repeated bytes dedicated_columns = 17 [(gogoproto.customtype) = "github.com/grafana/tempo/pkg/tempopb.DedicatedColumn"];
-    repeated bytes dedicated_columns = 17 [(gogoproto.customtype) = "github.com/grafana/tempo/tempodb/backend/meta.DedicatedColumn"];
+    // repeated bytes dedicated_columns = 17 [(gogoproto.customtype) = "github.com/grafana/tempo/tempodb/backend/meta.DedicatedColumn"];
+    bytes dedicated_columns = 17;
     uint32 replication_factor = 18;
 }
 
