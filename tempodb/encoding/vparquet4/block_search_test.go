@@ -264,11 +264,11 @@ func makeBackendBlockWithTraces(t *testing.T, trs []*Trace) *backendBlock {
 		BloomShardSizeBytes: 100 * 1024,
 	}
 
-	meta := backend.NewBlockMeta("fake", uuid.New(), VersionString, backend.EncNone, "")
-	meta.TotalObjects = 1
-	meta.DedicatedColumns = test.MakeDedicatedColumns()
+	blockMeta := backend.NewBlockMeta("fake", uuid.New(), VersionString, backend.EncNone, "")
+	blockMeta.TotalObjects = 1
+	blockMeta.DedicatedColumns = test.MakeDedicatedColumns()
 
-	s := newStreamingBlock(ctx, cfg, meta, r, w, tempo_io.NewBufferedWriter)
+	s := newStreamingBlock(ctx, cfg, blockMeta, r, w, tempo_io.NewBufferedWriter)
 
 	for i, tr := range trs {
 		err = s.Add(tr, 0, 0)

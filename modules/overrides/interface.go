@@ -10,7 +10,7 @@ import (
 
 	"github.com/grafana/tempo/pkg/sharedconfig"
 	"github.com/grafana/tempo/pkg/spanfilter/config"
-	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 )
 
 type Service interface {
@@ -74,7 +74,7 @@ type Interface interface {
 	CompactionDisabled(userID string) bool
 	MaxSearchDuration(userID string) time.Duration
 	MaxMetricsDuration(userID string) time.Duration
-	DedicatedColumns(userID string) backend.DedicatedColumns
+	DedicatedColumns(userID string) meta.DedicatedColumns
 	UnsafeQueryHints(userID string) bool
 
 	// Management API

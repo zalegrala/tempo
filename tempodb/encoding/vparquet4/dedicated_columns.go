@@ -2,13 +2,13 @@ package vparquet4
 
 import (
 	v1 "github.com/grafana/tempo/pkg/tempopb/common/v1"
-	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 )
 
 // Column paths for spare dedicated attribute columns
-var DedicatedResourceColumnPaths = map[backend.DedicatedColumnScope]map[backend.DedicatedColumnType][]string{
-	backend.DedicatedColumnScopeResource: {
-		backend.DedicatedColumnTypeString: {
+var DedicatedResourceColumnPaths = map[meta.DedicatedColumnScope]map[meta.DedicatedColumnType][]string{
+	meta.DedicatedColumnScopeResource: {
+		meta.DedicatedColumnTypeString: {
 			"rs.list.element.Resource.DedicatedAttributes.String01",
 			"rs.list.element.Resource.DedicatedAttributes.String02",
 			"rs.list.element.Resource.DedicatedAttributes.String03",
@@ -21,8 +21,8 @@ var DedicatedResourceColumnPaths = map[backend.DedicatedColumnScope]map[backend.
 			"rs.list.element.Resource.DedicatedAttributes.String10",
 		},
 	},
-	backend.DedicatedColumnScopeSpan: {
-		backend.DedicatedColumnTypeString: {
+	meta.DedicatedColumnScopeSpan: {
+		meta.DedicatedColumnTypeString: {
 			"rs.list.element.ss.list.element.Spans.list.element.DedicatedAttributes.String01",
 			"rs.list.element.ss.list.element.Spans.list.element.DedicatedAttributes.String02",
 			"rs.list.element.ss.list.element.Spans.list.element.DedicatedAttributes.String03",
@@ -38,14 +38,14 @@ var DedicatedResourceColumnPaths = map[backend.DedicatedColumnScope]map[backend.
 }
 
 type dedicatedColumn struct {
-	Type        backend.DedicatedColumnType
+	Type        meta.DedicatedColumnType
 	ColumnPath  string
 	ColumnIndex int
 }
 
 func (dc *dedicatedColumn) readValue(attrs *DedicatedAttributes) *v1.AnyValue {
 	switch dc.Type {
-	case backend.DedicatedColumnTypeString:
+	case meta.DedicatedColumnTypeString:
 		var strVal *string
 		switch dc.ColumnIndex {
 		case 0:
@@ -80,7 +80,7 @@ func (dc *dedicatedColumn) readValue(attrs *DedicatedAttributes) *v1.AnyValue {
 
 func (dc *dedicatedColumn) writeValue(attrs *DedicatedAttributes, value *v1.AnyValue) bool {
 	switch dc.Type {
-	case backend.DedicatedColumnTypeString:
+	case meta.DedicatedColumnTypeString:
 		strVal, ok := value.Value.(*v1.AnyValue_StringValue)
 		if !ok {
 			return false
@@ -145,11 +145,11 @@ func (dm *dedicatedColumnMapping) forEach(callback func(attr string, column dedi
 	}
 }
 
-var allScopes = []backend.DedicatedColumnScope{backend.DedicatedColumnScopeResource, backend.DedicatedColumnScopeSpan}
+var allScopes = []meta.DedicatedColumnScope{meta.DedicatedColumnScopeResource, meta.DedicatedColumnScopeSpan}
 
 // dedicatedColumnsToColumnMapping returns mapping from attribute names to spare columns for a give
 // block meta and scope.
-func dedicatedColumnsToColumnMapping(dedicatedColumns backend.DedicatedColumns, scopes ...backend.DedicatedColumnScope) dedicatedColumnMapping {
+func dedicatedColumnsToColumnMapping(dedicatedColumns meta.DedicatedColumns, scopes ...meta.DedicatedColumnScope) dedicatedColumnMapping {
 	if len(scopes) == 0 {
 		scopes = allScopes
 	}
@@ -162,7 +162,7 @@ func dedicatedColumnsToColumnMapping(dedicatedColumns backend.DedicatedColumns, 
 			continue
 		}
 
-		indexByType := map[backend.DedicatedColumnType]int{}
+		indexByType := map[meta.DedicatedColumnType]int{}
 		for _, c := range dedicatedColumns {
 			if c.Scope != scope {
 				continue

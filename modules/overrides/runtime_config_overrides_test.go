@@ -21,7 +21,7 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/grafana/tempo/pkg/sharedconfig"
-	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 )
 
 func TestRuntimeConfigOverrides_loadPerTenantOverrides(t *testing.T) {
@@ -454,18 +454,18 @@ func TestTempoDBOverrides(t *testing.T) {
 		name                     string
 		defaultLimits            Overrides
 		perTenantOverrides       string
-		expectedDedicatedColumns map[string]backend.DedicatedColumns
+		expectedDedicatedColumns map[string]meta.DedicatedColumns
 	}{
 		{
 			name: "limits",
 			defaultLimits: Overrides{
 				Storage: StorageOverrides{
-					DedicatedColumns: backend.DedicatedColumns{
+					DedicatedColumns: meta.DedicatedColumns{
 						{Scope: "resource", Name: "namespace", Type: "string"},
 					},
 				},
 			},
-			expectedDedicatedColumns: map[string]backend.DedicatedColumns{
+			expectedDedicatedColumns: map[string]meta.DedicatedColumns{
 				"user1": {{Scope: "resource", Name: "namespace", Type: "string"}},
 				"user2": {{Scope: "resource", Name: "namespace", Type: "string"}},
 			},
@@ -474,7 +474,7 @@ func TestTempoDBOverrides(t *testing.T) {
 			name: "basic overrides",
 			defaultLimits: Overrides{
 				Storage: StorageOverrides{
-					DedicatedColumns: backend.DedicatedColumns{
+					DedicatedColumns: meta.DedicatedColumns{
 						{Scope: "resource", Name: "namespace", Type: "string"},
 					},
 				},
@@ -488,7 +488,7 @@ overrides:
           name: "http.status"
           type: "int"
 `,
-			expectedDedicatedColumns: map[string]backend.DedicatedColumns{
+			expectedDedicatedColumns: map[string]meta.DedicatedColumns{
 				"user1": {{Scope: "resource", Name: "namespace", Type: "string"}},
 				"user2": {{Scope: "span", Name: "http.status", Type: "int"}},
 			},
@@ -497,7 +497,7 @@ overrides:
 			name: "empty dedicated columns override global cfg",
 			defaultLimits: Overrides{
 				Storage: StorageOverrides{
-					DedicatedColumns: backend.DedicatedColumns{
+					DedicatedColumns: meta.DedicatedColumns{
 						{Scope: "resource", Name: "namespace", Type: "string"},
 					},
 				},
@@ -509,7 +509,7 @@ overrides:
     storage:
       parquet_dedicated_columns: []
 `,
-			expectedDedicatedColumns: map[string]backend.DedicatedColumns{
+			expectedDedicatedColumns: map[string]meta.DedicatedColumns{
 				"user1": {{Scope: "resource", Name: "namespace", Type: "string"}},
 				"user2": {},
 			},

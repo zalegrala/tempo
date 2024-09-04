@@ -8,7 +8,7 @@ import (
 	"github.com/grafana/tempo/pkg/parquetquery"
 	v1 "github.com/grafana/tempo/pkg/tempopb/trace/v1"
 	"github.com/grafana/tempo/pkg/traceql"
-	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 	"github.com/grafana/tempo/tempodb/encoding/common"
 	"github.com/parquet-go/parquet-go"
 	"github.com/pkg/errors"
@@ -91,7 +91,7 @@ func (b *backendBlock) FetchTagNames(ctx context.Context, req traceql.FetchTagsR
 	return nil
 }
 
-func tagNamesForSpecialColumns(scope traceql.AttributeScope, pf *parquet.File, dcs backend.DedicatedColumns, cb traceql.FetchTagsCallback) {
+func tagNamesForSpecialColumns(scope traceql.AttributeScope, pf *parquet.File, dcs meta.DedicatedColumns, cb traceql.FetchTagsCallback) {
 	// currently just seeing if any row groups have values. future improvements:
 	// - only check those row groups that otherwise have a match in the iterators above
 	// - use rep/def levels to determine if a value exists at a row w/o actually testing values.
@@ -124,7 +124,7 @@ func tagNamesForSpecialColumns(scope traceql.AttributeScope, pf *parquet.File, d
 
 	// add all span dedicated columns that have values
 	if scope == traceql.AttributeScopeNone || scope == traceql.AttributeScopeSpan {
-		dedCols := dedicatedColumnsToColumnMapping(dcs, backend.DedicatedColumnScopeSpan)
+		dedCols := dedicatedColumnsToColumnMapping(dcs, meta.DedicatedColumnScopeSpan)
 		for name, col := range dedCols.mapping {
 			if hasValues(col.ColumnPath, pf) {
 				if cb(name, traceql.AttributeScopeSpan) {
@@ -136,7 +136,7 @@ func tagNamesForSpecialColumns(scope traceql.AttributeScope, pf *parquet.File, d
 
 	// add all resource dedicated columns that have values
 	if scope == traceql.AttributeScopeNone || scope == traceql.AttributeScopeResource {
-		dedCols := dedicatedColumnsToColumnMapping(dcs, backend.DedicatedColumnScopeResource)
+		dedCols := dedicatedColumnsToColumnMapping(dcs, meta.DedicatedColumnScopeResource)
 		for name, col := range dedCols.mapping {
 			if hasValues(col.ColumnPath, pf) {
 				if cb(name, traceql.AttributeScopeResource) {
@@ -200,7 +200,7 @@ func (b *backendBlock) FetchTagValues(ctx context.Context, req traceql.FetchTagV
 }
 
 // autocompleteIter creates an iterator that will collect values for a given attribute/tag.
-func autocompleteIter(ctx context.Context, tr tagRequest, pf *parquet.File, opts common.SearchOptions, dc backend.DedicatedColumns) (parquetquery.Iterator, error) {
+func autocompleteIter(ctx context.Context, tr tagRequest, pf *parquet.File, opts common.SearchOptions, dc meta.DedicatedColumns) (parquetquery.Iterator, error) {
 	// categorizeConditions conditions into span-level or resource-level
 	_, spanConditions, resourceConditions, traceConditions, err := categorizeConditions(tr.conditions)
 	if err != nil {
@@ -242,14 +242,14 @@ func createDistinctSpanIterator(
 	makeIter makeIterFn,
 	tr tagRequest,
 	conditions []traceql.Condition,
-	dedicatedColumns backend.DedicatedColumns,
+	dedicatedColumns meta.DedicatedColumns,
 ) (parquetquery.Iterator, error) {
 	var (
 		columnSelectAs    = map[string]string{}
 		columnPredicates  = map[string][]parquetquery.Predicate{}
 		iters             []parquetquery.Iterator
 		genericConditions []traceql.Condition
-		columnMapping     = dedicatedColumnsToColumnMapping(dedicatedColumns, backend.DedicatedColumnScopeSpan)
+		columnMapping     = dedicatedColumnsToColumnMapping(dedicatedColumns, meta.DedicatedColumnScopeSpan)
 	)
 
 	// TODO: Potentially problematic when wanted attribute is also part of a condition
@@ -580,14 +580,14 @@ func createDistinctResourceIterator(
 	tr tagRequest,
 	spanIterator parquetquery.Iterator,
 	conditions []traceql.Condition,
-	dedicatedColumns backend.DedicatedColumns,
+	dedicatedColumns meta.DedicatedColumns,
 ) (parquetquery.Iterator, error) {
 	var (
 		columnSelectAs    = map[string]string{}
 		columnPredicates  = map[string][]parquetquery.Predicate{}
 		iters             = []parquetquery.Iterator{}
 		genericConditions []traceql.Condition
-		columnMapping     = dedicatedColumnsToColumnMapping(dedicatedColumns, backend.DedicatedColumnScopeResource)
+		columnMapping     = dedicatedColumnsToColumnMapping(dedicatedColumns, meta.DedicatedColumnScopeResource)
 	)
 
 	addPredicate := func(columnPath string, p parquetquery.Predicate) {

@@ -15,6 +15,7 @@ import (
 	"github.com/grafana/tempo/pkg/util/test"
 	"github.com/grafana/tempo/tempodb"
 	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 	"github.com/grafana/tempo/tempodb/encoding"
 	"github.com/grafana/tempo/tempodb/encoding/common"
 	"github.com/grafana/tempo/tempodb/encoding/vparquet3"
@@ -26,7 +27,7 @@ type mockOverrides struct{}
 
 var _ ProcessorOverrides = (*mockOverrides)(nil)
 
-func (m *mockOverrides) DedicatedColumns(string) backend.DedicatedColumns {
+func (m *mockOverrides) DedicatedColumns(string) meta.DedicatedColumns {
 	return nil
 }
 

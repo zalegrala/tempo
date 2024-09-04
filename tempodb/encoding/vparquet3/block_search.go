@@ -17,7 +17,7 @@ import (
 	v1 "github.com/grafana/tempo/pkg/tempopb/trace/v1"
 	"github.com/grafana/tempo/pkg/traceql"
 	"github.com/grafana/tempo/pkg/util"
-	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 	"github.com/grafana/tempo/tempodb/encoding/common"
 )
 
@@ -118,7 +118,7 @@ func (b *backendBlock) Search(ctx context.Context, req *tempopb.SearchRequest, o
 	return results, nil
 }
 
-func makePipelineWithRowGroups(ctx context.Context, req *tempopb.SearchRequest, pf *parquet.File, rgs []parquet.RowGroup, dc backend.DedicatedColumns) pq.Iterator {
+func makePipelineWithRowGroups(ctx context.Context, req *tempopb.SearchRequest, pf *parquet.File, rgs []parquet.RowGroup, dc meta.DedicatedColumns) pq.Iterator {
 	makeIter := makeIterFunc(ctx, rgs, pf)
 
 	// Wire up iterators
@@ -259,7 +259,7 @@ func makePipelineWithRowGroups(ctx context.Context, req *tempopb.SearchRequest, 
 	}
 }
 
-func searchParquetFile(ctx context.Context, pf *parquet.File, req *tempopb.SearchRequest, rgs []parquet.RowGroup, dc backend.DedicatedColumns) (*tempopb.SearchResponse, error) {
+func searchParquetFile(ctx context.Context, pf *parquet.File, req *tempopb.SearchRequest, rgs []parquet.RowGroup, dc meta.DedicatedColumns) (*tempopb.SearchResponse, error) {
 	// Search happens in 2 phases for an optimization.
 	// Phase 1 is iterate all columns involved in the request.
 	// Only if there are any matches do we enter phase 2, which
@@ -286,7 +286,7 @@ func searchParquetFile(ctx context.Context, pf *parquet.File, req *tempopb.Searc
 	}, nil
 }
 
-func searchRaw(ctx context.Context, pf *parquet.File, req *tempopb.SearchRequest, rgs []parquet.RowGroup, dc backend.DedicatedColumns) ([]pq.RowNumber, error) {
+func searchRaw(ctx context.Context, pf *parquet.File, req *tempopb.SearchRequest, rgs []parquet.RowGroup, dc meta.DedicatedColumns) ([]pq.RowNumber, error) {
 	iter := makePipelineWithRowGroups(ctx, req, pf, rgs, dc)
 	if iter == nil {
 		return nil, errors.New("make pipeline returned a nil iterator")

@@ -6,6 +6,7 @@ import (
 
 	"github.com/grafana/tempo/pkg/util"
 	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 )
 
 const (
@@ -32,7 +33,7 @@ type BlockConfig struct {
 	RowGroupSizeBytes int `yaml:"parquet_row_group_size_bytes"`
 
 	// vParquet3 fields
-	DedicatedColumns backend.DedicatedColumns `yaml:"parquet_dedicated_columns"`
+	DedicatedColumns meta.DedicatedColumns `yaml:"parquet_dedicated_columns"`
 }
 
 func (cfg *BlockConfig) RegisterFlagsAndApplyDefaults(prefix string, f *flag.FlagSet) {

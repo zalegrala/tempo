@@ -40,6 +40,7 @@ import (
 	"github.com/grafana/tempo/pkg/util/log"
 	"github.com/grafana/tempo/pkg/validation"
 	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 	"github.com/grafana/tempo/tempodb/encoding/common"
 )
 
@@ -814,7 +815,7 @@ func (q *Querier) internalSearchBlock(ctx context.Context, req *tempopb.SearchBl
 		return nil, err
 	}
 
-	dc, err := backend.DedicatedColumnsFromTempopb(req.DedicatedColumns)
+	dc, err := meta.DedicatedColumnsFromTempopb(req.DedicatedColumns)
 	if err != nil {
 		return nil, err
 	}
@@ -877,7 +878,7 @@ func (q *Querier) internalTagsSearchBlockV2(ctx context.Context, req *tempopb.Se
 		return nil, err
 	}
 
-	dc, err := backend.DedicatedColumnsFromTempopb(req.DedicatedColumns)
+	dc, err := meta.DedicatedColumnsFromTempopb(req.DedicatedColumns)
 	if err != nil {
 		return nil, err
 	}
@@ -965,7 +966,7 @@ func (q *Querier) internalTagValuesSearchBlock(ctx context.Context, req *tempopb
 		return &tempopb.SearchTagValuesResponse{}, err
 	}
 
-	dc, err := backend.DedicatedColumnsFromTempopb(req.DedicatedColumns)
+	dc, err := meta.DedicatedColumnsFromTempopb(req.DedicatedColumns)
 	if err != nil {
 		return &tempopb.SearchTagValuesResponse{}, err
 	}
@@ -1013,7 +1014,7 @@ func (q *Querier) internalTagValuesSearchBlockV2(ctx context.Context, req *tempo
 		return &tempopb.SearchTagValuesV2Response{}, err
 	}
 
-	dc, err := backend.DedicatedColumnsFromTempopb(req.DedicatedColumns)
+	dc, err := meta.DedicatedColumnsFromTempopb(req.DedicatedColumns)
 	if err != nil {
 		return &tempopb.SearchTagValuesV2Response{}, err
 	}

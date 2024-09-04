@@ -17,6 +17,7 @@ import (
 	"github.com/grafana/tempo/pkg/util/test"
 	"github.com/grafana/tempo/tempodb/backend"
 	"github.com/grafana/tempo/tempodb/backend/local"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 	"github.com/grafana/tempo/tempodb/encoding/common"
 )
 
@@ -110,7 +111,7 @@ func BenchmarkCompactorDupes(b *testing.B) {
 // Trace IDs are guaranteed to be monotonically increasing so that
 // the block will be iterated in order.
 // nolint: revive
-func createTestBlock(t testing.TB, ctx context.Context, cfg *common.BlockConfig, r backend.Reader, w backend.Writer, traceCount, batchCount, spanCount, replicationFactor int, dc backend.DedicatedColumns) *backend.BlockMeta {
+func createTestBlock(t testing.TB, ctx context.Context, cfg *common.BlockConfig, r backend.Reader, w backend.Writer, traceCount, batchCount, spanCount, replicationFactor int, dc meta.DedicatedColumns) *backend.BlockMeta {
 	inMeta := &backend.BlockMeta{
 		TenantID:          tenantID,
 		BlockID:           uuid.New(),
@@ -197,7 +198,7 @@ func TestCompact(t *testing.T) {
 		ObjectsCombined: func(compactionLevel, objects int) {},
 	})
 
-	dedicatedColumns := backend.DedicatedColumns{
+	dedicatedColumns := meta.DedicatedColumns{
 		{Scope: "resource", Name: "dedicated.resource.1", Type: "string"},
 		{Scope: "span", Name: "dedicated.span.1", Type: "string"},
 	}

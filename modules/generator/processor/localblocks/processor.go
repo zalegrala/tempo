@@ -26,6 +26,7 @@ import (
 	"github.com/grafana/tempo/pkg/traceqlmetrics"
 	"github.com/grafana/tempo/pkg/util/log"
 	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 	"github.com/grafana/tempo/tempodb/encoding"
 	"github.com/grafana/tempo/tempodb/encoding/common"
 	"github.com/grafana/tempo/tempodb/wal"
@@ -35,7 +36,7 @@ const timeBuffer = 5 * time.Minute
 
 // ProcessorOverrides is just the set of overrides needed here.
 type ProcessorOverrides interface {
-	DedicatedColumns(string) backend.DedicatedColumns
+	DedicatedColumns(string) meta.DedicatedColumns
 	MaxBytesPerTrace(string) int
 	UnsafeQueryHints(string) bool
 }

@@ -30,6 +30,7 @@ import (
 	"github.com/grafana/tempo/tempodb"
 	"github.com/grafana/tempo/tempodb/backend"
 	"github.com/grafana/tempo/tempodb/backend/local"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 	"github.com/grafana/tempo/tempodb/encoding"
 	"github.com/grafana/tempo/tempodb/encoding/common"
 	"github.com/grafana/tempo/tempodb/wal"
@@ -366,7 +367,7 @@ func TestDedicatedColumns(t *testing.T) {
 
 	cfg := overrides.Config{}
 	cfg.RegisterFlagsAndApplyDefaults(&flag.FlagSet{})
-	cfg.Defaults.Storage.DedicatedColumns = backend.DedicatedColumns{{Scope: "span", Name: "foo", Type: "string"}}
+	cfg.Defaults.Storage.DedicatedColumns = meta.DedicatedColumns{{Scope: "span", Name: "foo", Type: "string"}}
 
 	i := defaultIngesterWithOverrides(t, tmpDir, cfg)
 	inst, _ := i.getOrCreateInstance("test")

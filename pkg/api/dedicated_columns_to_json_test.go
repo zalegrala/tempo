@@ -6,14 +6,14 @@ import (
 	"testing"
 
 	"github.com/grafana/tempo/pkg/util/test"
-	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 	"github.com/stretchr/testify/require"
 )
 
 func TestDedicatedColumnsToJson(t *testing.T) {
 	d := NewDedicatedColumnsToJSON()
 
-	testCols := []backend.DedicatedColumns{}
+	testCols := []meta.DedicatedColumns{}
 	for i := 0; i < 10; i++ {
 		testCols = append(testCols, randoDedicatedCols())
 	}
@@ -30,7 +30,7 @@ func TestDedicatedColumnsToJson(t *testing.T) {
 	}
 }
 
-func dedicatedColsToJSON(t *testing.T, cols backend.DedicatedColumns) string {
+func dedicatedColsToJSON(t *testing.T, cols meta.DedicatedColumns) string {
 	t.Helper()
 
 	proto, err := cols.ToTempopb()
@@ -43,20 +43,20 @@ func dedicatedColsToJSON(t *testing.T, cols backend.DedicatedColumns) string {
 }
 
 // randoDedicatedCols generates a random set of cols for testing
-func randoDedicatedCols() backend.DedicatedColumns {
+func randoDedicatedCols() meta.DedicatedColumns {
 	colCount := rand.IntN(5) + 1
-	ret := make([]backend.DedicatedColumn, 0, colCount)
+	ret := make([]meta.DedicatedColumn, 0, colCount)
 
 	for i := 0; i < colCount; i++ {
-		scope := backend.DedicatedColumnScopeSpan
+		scope := meta.DedicatedColumnScopeSpan
 		if rand.IntN(2) == 0 {
-			scope = backend.DedicatedColumnScopeResource
+			scope = meta.DedicatedColumnScopeResource
 		}
 
-		col := backend.DedicatedColumn{
+		col := meta.DedicatedColumn{
 			Scope: scope,
 			Name:  test.RandomString(),
-			Type:  backend.DedicatedColumnTypeString,
+			Type:  meta.DedicatedColumnTypeString,
 		}
 
 		ret = append(ret, col)

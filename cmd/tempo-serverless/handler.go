@@ -25,6 +25,7 @@ import (
 	"github.com/grafana/tempo/tempodb/backend/azure"
 	"github.com/grafana/tempo/tempodb/backend/gcs"
 	"github.com/grafana/tempo/tempodb/backend/local"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 	"github.com/grafana/tempo/tempodb/backend/s3"
 	"github.com/grafana/tempo/tempodb/encoding"
 	"github.com/grafana/tempo/tempodb/encoding/common"
@@ -81,7 +82,7 @@ func Handler(r *http.Request) (*tempopb.SearchResponse, *HTTPError) {
 		return nil, httpError("parsing encoding", err, http.StatusBadRequest)
 	}
 
-	dc, err := backend.DedicatedColumnsFromTempopb(searchReq.DedicatedColumns)
+	dc, err := meta.DedicatedColumnsFromTempopb(searchReq.DedicatedColumns)
 	if err != nil {
 		return nil, httpError("parsing dedicated columns", err, http.StatusBadRequest)
 	}

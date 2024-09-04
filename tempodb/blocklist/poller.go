@@ -23,6 +23,7 @@ import (
 
 	"github.com/grafana/tempo/pkg/boundedwaitgroup"
 	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 )
 
 const (
@@ -140,7 +141,7 @@ func (p *Poller) Do(previous *List) (PerTenant, PerTenantCompacted, error) {
 		diff := time.Since(start).Seconds()
 		metricBlocklistPollDuration.Observe(diff)
 		level.Info(p.logger).Log("msg", "blocklist poll complete", "seconds", diff)
-		backend.ClearDedicatedColumns()
+		meta.ClearDedicatedColumns()
 	}()
 
 	ctx, cancel := context.WithCancel(context.Background())

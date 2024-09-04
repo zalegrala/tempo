@@ -21,7 +21,7 @@ import (
 	filterconfig "github.com/grafana/tempo/pkg/spanfilter/config"
 	"github.com/grafana/tempo/pkg/util"
 	"github.com/grafana/tempo/pkg/util/log"
-	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 )
 
 type Validator interface {
@@ -520,7 +520,7 @@ func (o *runtimeConfigOverridesManager) CompactionDisabled(userID string) bool {
 	return o.getOverridesForUser(userID).Compaction.CompactionDisabled
 }
 
-func (o *runtimeConfigOverridesManager) DedicatedColumns(userID string) backend.DedicatedColumns {
+func (o *runtimeConfigOverridesManager) DedicatedColumns(userID string) meta.DedicatedColumns {
 	return o.getOverridesForUser(userID).Storage.DedicatedColumns
 }
 

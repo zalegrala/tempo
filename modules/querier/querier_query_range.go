@@ -14,6 +14,7 @@ import (
 	"github.com/grafana/tempo/pkg/traceql"
 	"github.com/grafana/tempo/pkg/util/log"
 	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 	"github.com/grafana/tempo/tempodb/encoding/common"
 )
 
@@ -72,7 +73,7 @@ func (q *Querier) queryBlock(ctx context.Context, req *tempopb.QueryRangeRequest
 		return nil, err
 	}
 
-	dc, err := backend.DedicatedColumnsFromTempopb(req.DedicatedColumns)
+	dc, err := meta.DedicatedColumnsFromTempopb(req.DedicatedColumns)
 	if err != nil {
 		return nil, err
 	}

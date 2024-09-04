@@ -15,6 +15,7 @@ import (
 	"github.com/grafana/tempo/pkg/traceql"
 	"github.com/grafana/tempo/tempodb/backend"
 	"github.com/grafana/tempo/tempodb/backend/local"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 	"github.com/grafana/tempo/tempodb/encoding/common"
 	"github.com/grafana/tempo/tempodb/encoding/vparquet3"
 	"github.com/grafana/tempo/tempodb/encoding/vparquet4"
@@ -37,7 +38,7 @@ func (cmd *convertParquet3to4) Run() error {
 	defer in.Close()
 
 	// open the input metadata file
-	meta, err := readBlockMeta(cmd.In)
+	blockMetakMetakMetakMeta, err := readBlockMeta(cmd.In)
 	if err != nil {
 		return err
 	}
@@ -51,10 +52,10 @@ func (cmd *convertParquet3to4) Run() error {
 	}
 
 	// calculate dedicated columns
-	var dedicatedCols backend.DedicatedColumns
+	var dedicatedCols meta.DedicatedColumns
 
 	if len(cmd.DedicatedColumns) > 0 {
-		dedicatedCols = make(backend.DedicatedColumns, 0, len(cmd.DedicatedColumns))
+		dedicatedCols = make(meta.DedicatedColumns, 0, len(cmd.DedicatedColumns))
 
 		for _, col := range cmd.DedicatedColumns {
 			att, err := traceql.ParseIdentifier(col)
@@ -62,21 +63,21 @@ func (cmd *convertParquet3to4) Run() error {
 				return err
 			}
 
-			scope := backend.DedicatedColumnScopeSpan
+			scope := meta.DedicatedColumnScopeSpan
 			if att.Scope == traceql.AttributeScopeResource {
-				scope = backend.DedicatedColumnScopeResource
+				scope = meta.DedicatedColumnScopeResource
 			}
 
 			fmt.Printf("add dedicated column scope=%s name=%s\n", scope, att.Name)
 
-			dedicatedCols = append(dedicatedCols, backend.DedicatedColumn{
+			dedicatedCols = append(dedicatedCols, meta.DedicatedColumn{
 				Scope: scope,
 				Name:  att.Name,
-				Type:  backend.DedicatedColumnTypeString,
+				Type:  meta.DedicatedColumnTypeString,
 			})
 		}
 	} else {
-		dedicatedCols = meta.DedicatedColumns
+		dedicatedCols = blockMetakMetakMetakMeta.DedicatedColumns
 	}
 
 	// copy block
@@ -87,17 +88,17 @@ func (cmd *convertParquet3to4) Run() error {
 		RowGroupSizeBytes:   100 * 1024 * 1024,
 	}
 
-	newMeta := *meta
+	newMeta := *blockMetakMetakMetakMeta
 	newMeta.Version = vparquet4.VersionString
 	newMeta.DedicatedColumns = dedicatedCols
 
 	// create iterator over in file
 	iter := &parquetIterator3{
 		r: parquet.NewGenericReader[*vparquet3.Trace](pf),
-		m: meta,
+		m: blockMetakMetakMetakMeta,
 	}
 
-	fmt.Printf("Creating vParquet4 block in %s\n", filepath.Join(cmd.Out, meta.TenantID, newMeta.BlockID.String()))
+	fmt.Printf("Creating vParquet4 block in %s\n", filepath.Join(cmd.Out, blockMetakMetakMetakMeta.TenantID, newMeta.BlockID.String()))
 	fmt.Printf("Converting rows 0 to %d\n", pf.NumRows())
 	outMeta, err := vparquet4.CreateBlock(context.Background(), blockCfg, &newMeta, iter, backend.NewReader(outR), backend.NewWriter(outW))
 	if err != nil {

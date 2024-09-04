@@ -12,6 +12,7 @@ import (
 	"github.com/grafana/tempo/pkg/traceql"
 	"github.com/grafana/tempo/tempodb/backend"
 	"github.com/grafana/tempo/tempodb/backend/local"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 	"github.com/grafana/tempo/tempodb/encoding/common"
 	"github.com/grafana/tempo/tempodb/encoding/vparquet2"
 	"github.com/grafana/tempo/tempodb/encoding/vparquet3"
@@ -34,7 +35,7 @@ func (cmd *convertParquet2to3) Run() error {
 	defer in.Close()
 
 	// open the input metadata file
-	meta, err := readBlockMeta(cmd.In)
+	blockMeta, err := readBlockMeta(cmd.In)
 	if err != nil {
 		return err
 	}
@@ -47,24 +48,24 @@ func (cmd *convertParquet2to3) Run() error {
 		return err
 	}
 
-	dedicatedCols := make([]backend.DedicatedColumn, 0, len(cmd.DedicatedColumns))
+	dedicatedCols := make([]meta.DedicatedColumn, 0, len(cmd.DedicatedColumns))
 	for _, col := range cmd.DedicatedColumns {
 		att, err := traceql.ParseIdentifier(col)
 		if err != nil {
 			return err
 		}
 
-		scope := backend.DedicatedColumnScopeSpan
+		scope := meta.DedicatedColumnScopeSpan
 		if att.Scope == traceql.AttributeScopeResource {
-			scope = backend.DedicatedColumnScopeResource
+			scope = meta.DedicatedColumnScopeResource
 		}
 
 		fmt.Println("scope", scope, "name", att.Name)
 
-		dedicatedCols = append(dedicatedCols, backend.DedicatedColumn{
+		dedicatedCols = append(dedicatedCols, meta.DedicatedColumn{
 			Scope: scope,
 			Name:  att.Name,
-			Type:  backend.DedicatedColumnTypeString,
+			Type:  meta.DedicatedColumnTypeString,
 		})
 	}
 
@@ -76,7 +77,7 @@ func (cmd *convertParquet2to3) Run() error {
 		DedicatedColumns:    dedicatedCols,
 	}
 
-	newMeta := *meta
+	newMeta := *blockMeta
 	newMeta.Version = vparquet3.VersionString
 	newMeta.DedicatedColumns = dedicatedCols
 

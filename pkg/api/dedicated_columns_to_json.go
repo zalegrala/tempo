@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"unsafe"
 
-	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 )
 
 type DedicatedColumnsToJSON struct {
@@ -17,7 +17,7 @@ func NewDedicatedColumnsToJSON() *DedicatedColumnsToJSON {
 	}
 }
 
-func (d *DedicatedColumnsToJSON) JSONForDedicatedColumns(cols backend.DedicatedColumns) (string, error) {
+func (d *DedicatedColumnsToJSON) JSONForDedicatedColumns(cols meta.DedicatedColumns) (string, error) {
 	if len(cols) == 0 {
 		return "", nil
 	}

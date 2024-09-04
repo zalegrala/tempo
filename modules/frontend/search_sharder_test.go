@@ -31,6 +31,7 @@ import (
 	"github.com/grafana/tempo/pkg/traceql"
 	"github.com/grafana/tempo/tempodb"
 	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 	"github.com/grafana/tempo/tempodb/blocklist"
 	"github.com/grafana/tempo/tempodb/encoding/common"
 )
@@ -140,7 +141,7 @@ func TestBuildBackendRequests(t *testing.T) {
 					Encoding:      backend.EncNone,
 					IndexPageSize: 13,
 					Version:       "vParquet3",
-					DedicatedColumns: backend.DedicatedColumns{
+					DedicatedColumns: meta.DedicatedColumns{
 						{Scope: "span", Name: "net.sock.host.addr", Type: "string"},
 					},
 				},

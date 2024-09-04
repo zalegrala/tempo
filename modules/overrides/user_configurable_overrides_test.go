@@ -23,6 +23,7 @@ import (
 	"github.com/grafana/tempo/pkg/util/listtomap"
 	"github.com/grafana/tempo/tempodb/backend"
 	"github.com/grafana/tempo/tempodb/backend/local"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 )
 
 const (
@@ -500,7 +501,7 @@ func perTenantRuntimeOverrides(tenantID string) *perTenantOverrides {
 				Forwarders: []string{"fwd", "fwd-2"},
 				Global:     GlobalOverrides{MaxBytesPerTrace: 5000000},
 				Storage: StorageOverrides{
-					DedicatedColumns: backend.DedicatedColumns{
+					DedicatedColumns: meta.DedicatedColumns{
 						{Scope: "resource", Name: "dedicated.resource.foo", Type: "string"},
 						{Scope: "span", Name: "dedicated.span.bar", Type: "string"},
 					},

@@ -6,7 +6,7 @@ import (
 	"github.com/grafana/tempo/modules/overrides"
 	"github.com/grafana/tempo/pkg/sharedconfig"
 	filterconfig "github.com/grafana/tempo/pkg/spanfilter/config"
-	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 )
 
 type mockOverrides struct {
@@ -30,7 +30,7 @@ type mockOverrides struct {
 	localBlocksFlushCheckPeriod                        time.Duration
 	localBlocksTraceIdlePeriod                         time.Duration
 	localBlocksCompleteBlockTimeout                    time.Duration
-	dedicatedColumns                                   backend.DedicatedColumns
+	dedicatedColumns                                   meta.DedicatedColumns
 	maxBytesPerTrace                                   int
 	unsafeQueryHints                                   bool
 	nativeHistograms                                   overrides.HistogramMethod
@@ -148,7 +148,7 @@ func (m *mockOverrides) MetricsGeneratorProcessorSpanMetricsTargetInfoExcludedDi
 	return m.spanMetricsTargetInfoExcludedDimensions
 }
 
-func (m *mockOverrides) DedicatedColumns(string) backend.DedicatedColumns {
+func (m *mockOverrides) DedicatedColumns(string) meta.DedicatedColumns {
 	return m.dedicatedColumns
 }
 

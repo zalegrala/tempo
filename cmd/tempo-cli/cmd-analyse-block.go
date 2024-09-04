@@ -19,6 +19,7 @@ import (
 	tempo_io "github.com/grafana/tempo/pkg/io"
 	pq "github.com/grafana/tempo/pkg/parquetquery"
 	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 	"github.com/grafana/tempo/tempodb/encoding/vparquet2"
 	"github.com/grafana/tempo/tempodb/encoding/vparquet3"
 	"github.com/grafana/tempo/tempodb/encoding/vparquet4"
@@ -69,12 +70,12 @@ func resourcePathsForVersion(v string) (string, []string) {
 	return "", nil
 }
 
-func dedicatedColPathForVersion(i int, scope backend.DedicatedColumnScope, v string) string {
+func dedicatedColPathForVersion(i int, scope meta.DedicatedColumnScope, v string) string {
 	switch v {
 	case vparquet3.VersionString:
-		return vparquet3.DedicatedResourceColumnPaths[scope][backend.DedicatedColumnTypeString][i]
+		return vparquet3.DedicatedResourceColumnPaths[scope][meta.DedicatedColumnTypeString][i]
 	case vparquet4.VersionString:
-		return vparquet4.DedicatedResourceColumnPaths[scope][backend.DedicatedColumnTypeString][i]
+		return vparquet4.DedicatedResourceColumnPaths[scope][meta.DedicatedColumnTypeString][i]
 	}
 	return ""
 }
@@ -112,38 +113,38 @@ func (cmd *analyseBlockCmd) Run(ctx *globalOptions) error {
 func processBlock(r backend.Reader, tenantID, blockID string, maxStartTime, minStartTime time.Time, minCompactionLvl uint8) (*blockSummary, error) {
 	id := uuid.MustParse(blockID)
 
-	meta, err := r.BlockMeta(context.TODO(), id, tenantID)
+	blockMeta, err := r.BlockMeta(context.TODO(), id, tenantID)
 	if err != nil {
 		return nil, err
 	}
-	if meta.CompactionLevel < minCompactionLvl {
+	if blockMeta.CompactionLevel < minCompactionLvl {
 		return nil, nil
 	}
-	if !maxStartTime.IsZero() && meta.StartTime.After(maxStartTime) {
+	if !maxStartTime.IsZero() && blockMeta.StartTime.After(maxStartTime) {
 		// Block is newer than maxStartTime
 		return nil, nil
 	}
-	if !minStartTime.IsZero() && meta.StartTime.Before(minStartTime) {
+	if !minStartTime.IsZero() && blockMeta.StartTime.Before(minStartTime) {
 		// Block is older than minStartTime
 		return nil, nil
 	}
 
 	var reader io.ReaderAt
-	switch meta.Version {
+	switch blockMeta.Version {
 	case vparquet2.VersionString:
-		reader = vparquet2.NewBackendReaderAt(context.Background(), r, vparquet2.DataFileName, meta)
+		reader = vparquet2.NewBackendReaderAt(context.Background(), r, vparquet2.DataFileName, blockMeta)
 	case vparquet3.VersionString:
-		reader = vparquet3.NewBackendReaderAt(context.Background(), r, vparquet3.DataFileName, meta)
+		reader = vparquet3.NewBackendReaderAt(context.Background(), r, vparquet3.DataFileName, blockMeta)
 	case vparquet4.VersionString:
-		reader = vparquet4.NewBackendReaderAt(context.Background(), r, vparquet4.DataFileName, meta)
+		reader = vparquet4.NewBackendReaderAt(context.Background(), r, vparquet4.DataFileName, blockMeta)
 	default:
-		fmt.Println("Unsupported block version:", meta.Version)
+		fmt.Println("Unsupported block version:", blockMeta.Version)
 		return nil, nil
 	}
 
-	br := tempo_io.NewBufferedReaderAt(reader, int64(meta.Size), 2*1024*1024, 64) // 128 MB memory buffering
+	br := tempo_io.NewBufferedReaderAt(reader, int64(blockMeta.Size), 2*1024*1024, 64) // 128 MB memory buffering
 
-	pf, err := parquet.OpenFile(br, int64(meta.Size), parquet.SkipBloomFilters(true), parquet.SkipPageIndex(true))
+	pf, err := parquet.OpenFile(br, int64(blockMeta.Size), parquet.SkipBloomFilters(true), parquet.SkipPageIndex(true))
 	if err != nil {
 		return nil, err
 	}
@@ -151,14 +152,14 @@ func processBlock(r backend.Reader, tenantID, blockID string, maxStartTime, minS
 	fmt.Println("Scanning block contents.  Press CRTL+C to quit ...")
 
 	// Aggregate span attributes
-	spanKey, spanVals := spanPathsForVersion(meta.Version)
+	spanKey, spanVals := spanPathsForVersion(blockMeta.Version)
 	spanAttrsSummary, err := aggregateAttributes(pf, spanKey, spanVals)
 	if err != nil {
 		return nil, err
 	}
 
 	// add up dedicated span attribute columns
-	spanDedicatedSummary, err := aggregateDedicatedColumns(pf, backend.DedicatedColumnScopeSpan, meta)
+	spanDedicatedSummary, err := aggregateDedicatedColumns(pf, meta.DedicatedColumnScopeSpan, blockMeta)
 	if err != nil {
 		return nil, err
 	}
@@ -170,14 +171,14 @@ func processBlock(r backend.Reader, tenantID, blockID string, maxStartTime, minS
 	spanAttrsSummary.totalBytes += spanDedicatedSummary.totalBytes
 
 	// Aggregate resource attributes
-	resourceKey, resourceVals := resourcePathsForVersion(meta.Version)
+	resourceKey, resourceVals := resourcePathsForVersion(blockMeta.Version)
 	resourceAttrsSummary, err := aggregateAttributes(pf, resourceKey, resourceVals)
 	if err != nil {
 		return nil, err
 	}
 
 	// add up dedicated resource attribute columns
-	resourceDedicatedSummary, err := aggregateDedicatedColumns(pf, backend.DedicatedColumnScopeResource, meta)
+	resourceDedicatedSummary, err := aggregateDedicatedColumns(pf, meta.DedicatedColumnScopeResource, blockMeta)
 	if err != nil {
 		return nil, err
 	}
@@ -268,7 +269,7 @@ func aggregateAttributes(pf *parquet.File, keyPath string, valuePaths []string) 
 	}, nil
 }
 
-func aggregateDedicatedColumns(pf *parquet.File, scope backend.DedicatedColumnScope, meta *backend.BlockMeta) (genericAttrSummary, error) {
+func aggregateDedicatedColumns(pf *parquet.File, scope meta.DedicatedColumnScope, meta *backend.BlockMeta) (genericAttrSummary, error) {
 	attrMap := make(map[string]uint64)
 	totalBytes := uint64(0)
 

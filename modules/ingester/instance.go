@@ -30,6 +30,7 @@ import (
 	"github.com/grafana/tempo/tempodb"
 	"github.com/grafana/tempo/tempodb/backend"
 	"github.com/grafana/tempo/tempodb/backend/local"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 	"github.com/grafana/tempo/tempodb/encoding"
 	"github.com/grafana/tempo/tempodb/encoding/common"
 )
@@ -103,7 +104,7 @@ type instance struct {
 	limiter            *Limiter
 	writer             tempodb.Writer
 
-	dedicatedColumns backend.DedicatedColumns
+	dedicatedColumns meta.DedicatedColumns
 	overrides        ingesterOverrides
 
 	local       *local.Backend
@@ -113,7 +114,7 @@ type instance struct {
 	hash hash.Hash32
 }
 
-func newInstance(instanceID string, limiter *Limiter, overrides ingesterOverrides, writer tempodb.Writer, l *local.Backend, dedicatedColumns backend.DedicatedColumns) (*instance, error) {
+func newInstance(instanceID string, limiter *Limiter, overrides ingesterOverrides, writer tempodb.Writer, l *local.Backend, dedicatedColumns meta.DedicatedColumns) (*instance, error) {
 	i := &instance{
 		traces:     map[uint32]*liveTrace{},
 		traceSizes: map[uint32]uint32{},
@@ -533,7 +534,7 @@ func (i *instance) resetHeadBlock() error {
 	return nil
 }
 
-func (i *instance) getDedicatedColumns() backend.DedicatedColumns {
+func (i *instance) getDedicatedColumns() meta.DedicatedColumns {
 	if cols := i.overrides.DedicatedColumns(i.instanceID); cols != nil {
 		err := cols.Validate()
 		if err != nil {

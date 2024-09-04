@@ -12,6 +12,7 @@ import (
 	v1_trace "github.com/grafana/tempo/pkg/tempopb/trace/v1"
 	"github.com/grafana/tempo/pkg/util"
 	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 	"github.com/grafana/tempo/tempodb/encoding/common"
 )
 
@@ -339,7 +340,7 @@ func attrToParquetTypeUnsupported(a *v1.KeyValue, p *Attribute) {
 
 // traceToParquet converts a tempopb.Trace to this schema's object model. Returns the new object and
 // a bool indicating if it's a connected trace or not
-func traceToParquet(meta *backend.BlockMeta, id common.ID, tr *tempopb.Trace, ot *Trace) (*Trace, bool) {
+func traceToParquet(blockMeta *backend.BlockMeta, id common.ID, tr *tempopb.Trace, ot *Trace) (*Trace, bool) {
 	if ot == nil {
 		ot = &Trace{}
 	}
@@ -354,8 +355,8 @@ func traceToParquet(meta *backend.BlockMeta, id common.ID, tr *tempopb.Trace, ot
 	var rootBatch *v1_trace.ResourceSpans
 
 	// Dedicated attribute column assignments
-	dedicatedResourceAttributes := dedicatedColumnsToColumnMapping(meta.DedicatedColumns, backend.DedicatedColumnScopeResource)
-	dedicatedSpanAttributes := dedicatedColumnsToColumnMapping(meta.DedicatedColumns, backend.DedicatedColumnScopeSpan)
+	dedicatedResourceAttributes := dedicatedColumnsToColumnMapping(blockMeta.DedicatedColumns, meta.DedicatedColumnScopeResource)
+	dedicatedSpanAttributes := dedicatedColumnsToColumnMapping(blockMeta.DedicatedColumns, meta.DedicatedColumnScopeSpan)
 
 	ot.ResourceSpans = extendReuseSlice(len(tr.ResourceSpans), ot.ResourceSpans)
 	for ib, b := range tr.ResourceSpans {
@@ -740,13 +741,13 @@ func parquetToProtoEvents(parquetEvents []Event, spanStartTimeNano uint64) []*v1
 	return protoEvents
 }
 
-func parquetTraceToTempopbTrace(meta *backend.BlockMeta, parquetTrace *Trace) *tempopb.Trace {
+func parquetTraceToTempopbTrace(blockMeta *backend.BlockMeta, parquetTrace *Trace) *tempopb.Trace {
 	protoTrace := &tempopb.Trace{}
 	protoTrace.ResourceSpans = make([]*v1_trace.ResourceSpans, 0, len(parquetTrace.ResourceSpans))
 
 	// dedicated attribute column assignments
-	dedicatedResourceAttributes := dedicatedColumnsToColumnMapping(meta.DedicatedColumns, backend.DedicatedColumnScopeResource)
-	dedicatedSpanAttributes := dedicatedColumnsToColumnMapping(meta.DedicatedColumns, backend.DedicatedColumnScopeSpan)
+	dedicatedResourceAttributes := dedicatedColumnsToColumnMapping(blockMeta.DedicatedColumns, meta.DedicatedColumnScopeResource)
+	dedicatedSpanAttributes := dedicatedColumnsToColumnMapping(blockMeta.DedicatedColumns, meta.DedicatedColumnScopeSpan)
 
 	for _, rs := range parquetTrace.ResourceSpans {
 		protoBatch := &v1_trace.ResourceSpans{}

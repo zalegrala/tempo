@@ -14,7 +14,7 @@ import (
 	"github.com/grafana/tempo/pkg/tempopb"
 	v1 "github.com/grafana/tempo/pkg/tempopb/trace/v1"
 	"github.com/grafana/tempo/pkg/util/test"
-	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 )
 
 func TestCombineLimitsNotHit(t *testing.T) {
@@ -141,7 +141,7 @@ func TestDedicatedColumns(t *testing.T) {
 	o, err := overrides.NewOverrides(overrides.Config{
 		Defaults: overrides.Overrides{
 			Storage: overrides.StorageOverrides{
-				DedicatedColumns: backend.DedicatedColumns{
+				DedicatedColumns: meta.DedicatedColumns{
 					{Scope: "resource", Name: "dedicated.resource.1", Type: "string"},
 					{Scope: "span", Name: "dedicated.span.1", Type: "string"},
 				},

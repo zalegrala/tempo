@@ -1,4 +1,4 @@
-package backend
+package meta
 
 import (
 	"encoding/json"

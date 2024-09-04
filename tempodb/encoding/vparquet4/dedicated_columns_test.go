@@ -7,23 +7,24 @@ import (
 
 	v1 "github.com/grafana/tempo/pkg/tempopb/common/v1"
 	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 )
 
 func TestDedicatedColumnsToColumnMapping(t *testing.T) {
 	tests := []struct {
 		name            string
-		columns         backend.DedicatedColumns
-		scopes          []backend.DedicatedColumnScope
+		columns         meta.DedicatedColumns
+		scopes          []meta.DedicatedColumnScope
 		expectedMapping dedicatedColumnMapping
 	}{
 		{
 			name: "scope span",
-			columns: backend.DedicatedColumns{
+			columns: meta.DedicatedColumns{
 				{Scope: "span", Name: "span.one", Type: "string"},
 				{Scope: "resource", Name: "res.one", Type: "string"},
 				{Scope: "span", Name: "span.two", Type: "string"},
 			},
-			scopes: []backend.DedicatedColumnScope{"span"},
+			scopes: []meta.DedicatedColumnScope{"span"},
 			expectedMapping: dedicatedColumnMapping{
 				mapping: map[string]dedicatedColumn{
 					"span.one": {Type: "string", ColumnIndex: 0, ColumnPath: "rs.list.element.ss.list.element.Spans.list.element.DedicatedAttributes.String01"},
@@ -34,13 +35,13 @@ func TestDedicatedColumnsToColumnMapping(t *testing.T) {
 		},
 		{
 			name: "scope resource",
-			columns: backend.DedicatedColumns{
+			columns: meta.DedicatedColumns{
 				{Scope: "resource", Name: "res.one", Type: "string"},
 				{Scope: "span", Name: "span.one", Type: "string"},
 				{Scope: "span", Name: "span.two", Type: "string"},
 				{Scope: "resource", Name: "res.two", Type: "string"},
 			},
-			scopes: []backend.DedicatedColumnScope{"resource"},
+			scopes: []meta.DedicatedColumnScope{"resource"},
 			expectedMapping: dedicatedColumnMapping{
 				mapping: map[string]dedicatedColumn{
 					"res.one": {Type: "string", ColumnIndex: 0, ColumnPath: "rs.list.element.Resource.DedicatedAttributes.String01"},
@@ -51,13 +52,13 @@ func TestDedicatedColumnsToColumnMapping(t *testing.T) {
 		},
 		{
 			name: "all scopes explicit",
-			columns: backend.DedicatedColumns{
+			columns: meta.DedicatedColumns{
 				{Scope: "resource", Name: "res.one", Type: "string"},
 				{Scope: "span", Name: "span.one", Type: "string"},
 				{Scope: "span", Name: "span.two", Type: "string"},
 				{Scope: "resource", Name: "res.two", Type: "string"},
 			},
-			scopes: []backend.DedicatedColumnScope{"resource", "span"},
+			scopes: []meta.DedicatedColumnScope{"resource", "span"},
 			expectedMapping: dedicatedColumnMapping{
 				mapping: map[string]dedicatedColumn{
 					"res.one":  {Type: "string", ColumnIndex: 0, ColumnPath: "rs.list.element.Resource.DedicatedAttributes.String01"},
@@ -70,13 +71,13 @@ func TestDedicatedColumnsToColumnMapping(t *testing.T) {
 		},
 		{
 			name: "all scopes implicit",
-			columns: backend.DedicatedColumns{
+			columns: meta.DedicatedColumns{
 				{Scope: "resource", Name: "res.one", Type: "string"},
 				{Scope: "span", Name: "span.one", Type: "string"},
 				{Scope: "span", Name: "span.two", Type: "string"},
 				{Scope: "resource", Name: "res.two", Type: "string"},
 			},
-			scopes: []backend.DedicatedColumnScope{},
+			scopes: []meta.DedicatedColumnScope{},
 			expectedMapping: dedicatedColumnMapping{
 				mapping: map[string]dedicatedColumn{
 					"res.one":  {Type: "string", ColumnIndex: 0, ColumnPath: "rs.list.element.Resource.DedicatedAttributes.String01"},
@@ -89,12 +90,12 @@ func TestDedicatedColumnsToColumnMapping(t *testing.T) {
 		},
 		{
 			name: "wrong type",
-			columns: backend.DedicatedColumns{
+			columns: meta.DedicatedColumns{
 				{Scope: "span", Name: "span.one", Type: "string"},
 				{Scope: "resource", Name: "res.one", Type: "string"},
 				{Scope: "span", Name: "span.two", Type: "integer"}, // ignored
 			},
-			scopes: []backend.DedicatedColumnScope{"span"},
+			scopes: []meta.DedicatedColumnScope{"span"},
 			expectedMapping: dedicatedColumnMapping{
 				mapping: map[string]dedicatedColumn{
 					"span.one": {Type: "string", ColumnIndex: 0, ColumnPath: "rs.list.element.ss.list.element.Spans.list.element.DedicatedAttributes.String01"},
@@ -104,7 +105,7 @@ func TestDedicatedColumnsToColumnMapping(t *testing.T) {
 		},
 		{
 			name: "too many columns",
-			columns: backend.DedicatedColumns{
+			columns: meta.DedicatedColumns{
 				{Scope: "span", Name: "span.one", Type: "string"},
 				{Scope: "span", Name: "span.two", Type: "string"},
 				{Scope: "span", Name: "span.three", Type: "string"},
@@ -117,7 +118,7 @@ func TestDedicatedColumnsToColumnMapping(t *testing.T) {
 				{Scope: "span", Name: "span.ten", Type: "string"},
 				{Scope: "span", Name: "span.eleven", Type: "string"}, // ignored
 			},
-			scopes: []backend.DedicatedColumnScope{"span"},
+			scopes: []meta.DedicatedColumnScope{"span"},
 			expectedMapping: dedicatedColumnMapping{
 				mapping: map[string]dedicatedColumn{
 					"span.one":   {Type: "string", ColumnIndex: 0, ColumnPath: "rs.list.element.ss.list.element.Spans.list.element.DedicatedAttributes.String01"},

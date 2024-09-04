@@ -8,7 +8,7 @@ import (
 	"github.com/grafana/tempo/modules/overrides"
 	"github.com/grafana/tempo/pkg/sharedconfig"
 	filterconfig "github.com/grafana/tempo/pkg/spanfilter/config"
-	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 )
 
 type metricsGeneratorOverrides interface {
@@ -37,7 +37,7 @@ type metricsGeneratorOverrides interface {
 	MetricsGeneratorProcessorServiceGraphsEnableMessagingSystemLatencyHistogram(userID string) bool
 	MetricsGeneratorProcessorServiceGraphsEnableVirtualNodeLabel(userID string) bool
 	MetricsGeneratorProcessorSpanMetricsTargetInfoExcludedDimensions(userID string) []string
-	DedicatedColumns(userID string) backend.DedicatedColumns
+	DedicatedColumns(userID string) meta.DedicatedColumns
 	MaxBytesPerTrace(userID string) int
 	UnsafeQueryHints(userID string) bool
 }

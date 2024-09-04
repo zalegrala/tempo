@@ -8,7 +8,7 @@ import (
 
 	pq "github.com/grafana/tempo/pkg/parquetquery"
 	"github.com/grafana/tempo/pkg/traceql"
-	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 	"github.com/grafana/tempo/tempodb/encoding/common"
 	"github.com/opentracing/opentracing-go"
 	"github.com/parquet-go/parquet-go"
@@ -61,7 +61,7 @@ func (b *backendBlock) SearchTags(ctx context.Context, scope traceql.AttributeSc
 	return searchTags(derivedCtx, scope, cb, pf, b.meta.DedicatedColumns)
 }
 
-func searchTags(_ context.Context, scope traceql.AttributeScope, cb common.TagsCallback, pf *parquet.File, dc backend.DedicatedColumns) error {
+func searchTags(_ context.Context, scope traceql.AttributeScope, cb common.TagsCallback, pf *parquet.File, dc meta.DedicatedColumns) error {
 	scanColumns := func(standardKeyPath string, specialMappings map[string]string, columnMapping dedicatedColumnMapping, cb common.TagsCallback, scope traceql.AttributeScope) error {
 		specialAttrIdxs := map[int]string{}
 
@@ -171,7 +171,7 @@ func searchTags(_ context.Context, scope traceql.AttributeScope, cb common.TagsC
 
 	// resource
 	if scope == traceql.AttributeScopeNone || scope == traceql.AttributeScopeResource {
-		columnMapping := dedicatedColumnsToColumnMapping(dc, backend.DedicatedColumnScopeResource)
+		columnMapping := dedicatedColumnsToColumnMapping(dc, meta.DedicatedColumnScopeResource)
 		err := scanColumns(FieldResourceAttrKey, traceqlResourceLabelMappings, columnMapping, cb, traceql.AttributeScopeResource)
 		if err != nil {
 			return err
@@ -179,7 +179,7 @@ func searchTags(_ context.Context, scope traceql.AttributeScope, cb common.TagsC
 	}
 	// span
 	if scope == traceql.AttributeScopeNone || scope == traceql.AttributeScopeSpan {
-		columnMapping := dedicatedColumnsToColumnMapping(dc, backend.DedicatedColumnScopeSpan)
+		columnMapping := dedicatedColumnsToColumnMapping(dc, meta.DedicatedColumnScopeSpan)
 		err := scanColumns(FieldSpanAttrKey, traceqlSpanLabelMappings, columnMapping, cb, traceql.AttributeScopeSpan)
 		if err != nil {
 			return err
@@ -222,7 +222,7 @@ func (b *backendBlock) SearchTagValuesV2(ctx context.Context, tag traceql.Attrib
 	return searchTagValues(derivedCtx, tag, cb, pf, b.meta.DedicatedColumns)
 }
 
-func searchTagValues(ctx context.Context, tag traceql.Attribute, cb common.TagValuesCallbackV2, pf *parquet.File, dc backend.DedicatedColumns) error {
+func searchTagValues(ctx context.Context, tag traceql.Attribute, cb common.TagValuesCallbackV2, pf *parquet.File, dc meta.DedicatedColumns) error {
 	// Special handling for intrinsics
 	if tag.Intrinsic != traceql.IntrinsicNone {
 		lookup := intrinsicColumnLookups[tag.Intrinsic]
@@ -255,7 +255,7 @@ func searchTagValues(ctx context.Context, tag traceql.Attribute, cb common.TagVa
 
 	// Search dynamic dedicated attribute columns
 	if tag.Scope == traceql.AttributeScopeResource || tag.Scope == traceql.AttributeScopeNone {
-		resourceColumnMapping := dedicatedColumnsToColumnMapping(dc, backend.DedicatedColumnScopeResource)
+		resourceColumnMapping := dedicatedColumnsToColumnMapping(dc, meta.DedicatedColumnScopeResource)
 		if c, ok := resourceColumnMapping.get(tag.Name); ok {
 			err := searchSpecialTagValues(ctx, c.ColumnPath, pf, cb)
 			if err != nil {
@@ -264,7 +264,7 @@ func searchTagValues(ctx context.Context, tag traceql.Attribute, cb common.TagVa
 		}
 	}
 	if tag.Scope == traceql.AttributeScopeSpan || tag.Scope == traceql.AttributeScopeNone {
-		spanColumnMapping := dedicatedColumnsToColumnMapping(dc, backend.DedicatedColumnScopeSpan)
+		spanColumnMapping := dedicatedColumnsToColumnMapping(dc, meta.DedicatedColumnScopeSpan)
 		if c, ok := spanColumnMapping.get(tag.Name); ok {
 			err := searchSpecialTagValues(ctx, c.ColumnPath, pf, cb)
 			if err != nil {

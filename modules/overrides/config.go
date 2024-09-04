@@ -7,7 +7,7 @@ import (
 	"github.com/prometheus/common/config"
 
 	"github.com/grafana/tempo/pkg/util/listtomap"
-	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -177,7 +177,7 @@ type GlobalOverrides struct {
 
 type StorageOverrides struct {
 	// tempodb limits
-	DedicatedColumns backend.DedicatedColumns `yaml:"parquet_dedicated_columns" json:"parquet_dedicated_columns"`
+	DedicatedColumns meta.DedicatedColumns `yaml:"parquet_dedicated_columns" json:"parquet_dedicated_columns"`
 }
 
 type Overrides struct {

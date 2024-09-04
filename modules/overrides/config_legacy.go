@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/grafana/tempo/pkg/util/listtomap"
-	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 
 	"github.com/prometheus/common/model"
 
@@ -135,7 +135,7 @@ type LegacyOverrides struct {
 	MaxBytesPerTrace int `yaml:"max_bytes_per_trace" json:"max_bytes_per_trace"`
 
 	// tempodb limits
-	DedicatedColumns backend.DedicatedColumns `yaml:"parquet_dedicated_columns" json:"parquet_dedicated_columns"`
+	DedicatedColumns meta.DedicatedColumns `yaml:"parquet_dedicated_columns" json:"parquet_dedicated_columns"`
 }
 
 func (l *LegacyOverrides) toNewLimits() Overrides {
