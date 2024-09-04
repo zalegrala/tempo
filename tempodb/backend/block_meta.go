@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -143,7 +144,15 @@ func (b *BlockMeta) ToBackendV1Proto() (*backend_v1.BlockMeta, error) {
 		BloomShardCount:   uint32(b.BloomShardCount),
 		FooterSize:        b.FooterSize,
 		ReplicationFactor: uint32(b.ReplicationFactor),
-		DedicatedColumns:  b.DedicatedColumns,
+	}
+
+	if len(b.DedicatedColumns) > 0 {
+		bb, err := json.Marshal(b.DedicatedColumns)
+		if err != nil {
+			return nil, err
+		}
+
+		m.DedicatedColumns = bb
 	}
 
 	return m, nil
@@ -170,8 +179,12 @@ func (b *BlockMeta) FromBackendV1Proto(pb *backend_v1.BlockMeta) error {
 	b.BloomShardCount = uint16(pb.BloomShardCount)
 	b.FooterSize = pb.FooterSize
 	b.ReplicationFactor = uint8(pb.ReplicationFactor)
+
 	if len(pb.DedicatedColumns) > 0 {
-		b.DedicatedColumns = pb.DedicatedColumns
+		err := json.Unmarshal(pb.DedicatedColumns, &b.DedicatedColumns)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil

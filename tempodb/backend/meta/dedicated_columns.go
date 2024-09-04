@@ -107,10 +107,9 @@ func (dc *DedicatedColumn) MarshalJSON() ([]byte, error) {
 
 func (dc *DedicatedColumn) UnmarshalJSON(b []byte) error {
 	type dcAlias DedicatedColumn // alias required to avoid recursive calls of UnmarshalJSON
-
 	err := json.Unmarshal(b, (*dcAlias)(dc))
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to unmarshal json: %w", err)
 	}
 	if dc.Scope == "" {
 		dc.Scope = DefaultDedicatedColumnScope
