@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/grafana/tempo/tempodb/backend"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -704,28 +705,28 @@ func TestTimeWindowBlockSelectorBlocksToCompact(t *testing.T) {
 				{
 					BlockID: uuid.MustParse("00000000-0000-0000-0000-000000000001"),
 					EndTime: now,
-					DedicatedColumns: backend.DedicatedColumns{
+					DedicatedColumns: meta.DedicatedColumns{
 						{Scope: "span", Name: "foo", Type: "int"},
 					},
 				},
 				{
 					BlockID: uuid.MustParse("00000000-0000-0000-0000-000000000002"),
 					EndTime: now,
-					DedicatedColumns: backend.DedicatedColumns{
+					DedicatedColumns: meta.DedicatedColumns{
 						{Scope: "span", Name: "foo", Type: "string"},
 					},
 				},
 				{
 					BlockID: uuid.MustParse("00000000-0000-0000-0000-000000000003"),
 					EndTime: now,
-					DedicatedColumns: backend.DedicatedColumns{
+					DedicatedColumns: meta.DedicatedColumns{
 						{Scope: "span", Name: "foo", Type: "int"},
 					},
 				},
 				{
 					BlockID: uuid.MustParse("00000000-0000-0000-0000-000000000004"),
 					EndTime: now,
-					DedicatedColumns: backend.DedicatedColumns{
+					DedicatedColumns: meta.DedicatedColumns{
 						{Scope: "span", Name: "foo", Type: "string"},
 					},
 				},
@@ -734,14 +735,14 @@ func TestTimeWindowBlockSelectorBlocksToCompact(t *testing.T) {
 				{
 					BlockID: uuid.MustParse("00000000-0000-0000-0000-000000000001"),
 					EndTime: now,
-					DedicatedColumns: backend.DedicatedColumns{
+					DedicatedColumns: meta.DedicatedColumns{
 						{Scope: "span", Name: "foo", Type: "int"},
 					},
 				},
 				{
 					BlockID: uuid.MustParse("00000000-0000-0000-0000-000000000003"),
 					EndTime: now,
-					DedicatedColumns: backend.DedicatedColumns{
+					DedicatedColumns: meta.DedicatedColumns{
 						{Scope: "span", Name: "foo", Type: "int"},
 					},
 				},
@@ -751,14 +752,14 @@ func TestTimeWindowBlockSelectorBlocksToCompact(t *testing.T) {
 				{
 					BlockID: uuid.MustParse("00000000-0000-0000-0000-000000000002"),
 					EndTime: now,
-					DedicatedColumns: backend.DedicatedColumns{
+					DedicatedColumns: meta.DedicatedColumns{
 						{Scope: "span", Name: "foo", Type: "string"},
 					},
 				},
 				{
 					BlockID: uuid.MustParse("00000000-0000-0000-0000-000000000004"),
 					EndTime: now,
-					DedicatedColumns: backend.DedicatedColumns{
+					DedicatedColumns: meta.DedicatedColumns{
 						{Scope: "span", Name: "foo", Type: "string"},
 					},
 				},

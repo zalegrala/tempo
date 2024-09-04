@@ -23,6 +23,7 @@ import (
 	"github.com/grafana/tempo/pkg/util/test"
 	"github.com/grafana/tempo/tempodb/backend"
 	"github.com/grafana/tempo/tempodb/backend/local"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 	"github.com/grafana/tempo/tempodb/blocklist"
 	"github.com/grafana/tempo/tempodb/encoding"
 	"github.com/grafana/tempo/tempodb/encoding/common"
@@ -98,7 +99,7 @@ func testCompactionRoundtrip(t *testing.T, targetBlockVersion string) {
 			Encoding:             backend.EncLZ4_4M,
 			IndexPageSizeBytes:   1000,
 			RowGroupSizeBytes:    30_000_000,
-			DedicatedColumns:     backend.DedicatedColumns{{Scope: "span", Name: "key", Type: "string"}},
+			DedicatedColumns:     meta.DedicatedColumns{{Scope: "span", Name: "key", Type: "string"}},
 		},
 		WAL: &wal.Config{
 			Filepath: path.Join(tempDir, "wal"),

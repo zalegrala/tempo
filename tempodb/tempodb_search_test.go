@@ -31,6 +31,7 @@ import (
 	"github.com/grafana/tempo/pkg/util/test"
 	"github.com/grafana/tempo/tempodb/backend"
 	"github.com/grafana/tempo/tempodb/backend/local"
+	"github.com/grafana/tempo/tempodb/backend/meta"
 	"github.com/grafana/tempo/tempodb/encoding"
 	"github.com/grafana/tempo/tempodb/encoding/common"
 	v2 "github.com/grafana/tempo/tempodb/encoding/v2"
@@ -1570,7 +1571,7 @@ func runCompleteBlockSearchTest(t *testing.T, blockVersion string, runners ...ru
 
 	tempDir := t.TempDir()
 
-	dc := backend.DedicatedColumns{
+	dc := meta.DedicatedColumns{
 		{Scope: "resource", Name: "res-dedicated.01", Type: "string"},
 		{Scope: "resource", Name: "res-dedicated.02", Type: "string"},
 		{Scope: "span", Name: "span-dedicated.01", Type: "string"},
