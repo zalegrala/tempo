@@ -722,6 +722,8 @@ func ValidateAndSanitizeRequest(r *http.Request) (string, string, string, int64,
 
 	q, _ := extractQueryParam(vals, QueryModeKey)
 
+	// TODO: hmm, block list as query params?
+
 	// validate queryMode. it should either be empty or one of (QueryModeIngesters|QueryModeBlocks|QueryModeAll)
 	var queryMode string
 	var startTime int64

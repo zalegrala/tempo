@@ -4,6 +4,7 @@ package tempopb;
 
 import "common/v1/common.proto";
 import "github.com/gogo/protobuf/gogoproto/gogo.proto";
+import "google/protobuf/timestamp.proto";
 import "trace/v1/trace.proto";
 
 service Pusher {
@@ -443,4 +444,36 @@ message TimeSeries {
   // Exemplars are optional and can be empty.
   // Sorted by time, oldest exemplar first.
   repeated Exemplar exemplars = 4 [(gogoproto.nullable) = false];
+}
+
+message BlockMeta {
+    string version = 1;
+    bytes block_id = 2;
+    bytes min_id = 3;
+    bytes max_id = 4;
+    string tenant_id = 5;
+    google.protobuf.Timestamp start_time = 6[(gogoproto.stdtime) = true, (gogoproto.nullable) = false];
+    google.protobuf.Timestamp end_time = 7[(gogoproto.stdtime) = true, (gogoproto.nullable) = false];
+    int32 total_objects = 8;
+    uint64 size = 9;
+    uint32 compaction_level = 10;
+    uint32 encoding = 11;
+    uint32 index_page_size = 12;
+    uint32 total_records = 13;
+    string data_encoding = 14;
+    uint32 bloom_shard_count = 15;
+    uint32 footer_size = 16;
+    repeated DedicatedColumn dedicated_columns = 17;
+    uint32 replication_factor = 18;
+}
+
+message CompactedBlockMeta {
+    BlockMeta block_meta = 1[(gogoproto.embed) = true, (gogoproto.nullable) = false];
+    google.protobuf.Timestamp compacted_time = 2[(gogoproto.stdtime) = true, (gogoproto.nullable) = false];
+}
+
+message TenantIndex {
+    google.protobuf.Timestamp created_at = 1[(gogoproto.stdtime) = true, (gogoproto.nullable) = false];
+    repeated BlockMeta meta = 2;
+    repeated CompactedBlockMeta compacted_meta = 3;
 }

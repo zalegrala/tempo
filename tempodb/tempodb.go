@@ -276,7 +276,7 @@ func (rw *readerWriter) BlockMetas(tenantID string) []*backend.BlockMeta {
 	return rw.blocklist.Metas(tenantID)
 }
 
-func (rw *readerWriter) Find(ctx context.Context, tenantID string, id common.ID, blockStart string, blockEnd string, timeStart int64, timeEnd int64, opts common.SearchOptions) ([]*tempopb.Trace, []error, error) {
+func (rw *readerWriter) Find(ctx context.Context, tenantID string, id common.ID, blockStart string, blockEnd string, timeStart int64, timeEnd int64, opts common.SearchOptions, blocklist []*backend.BlockMeta, compactedBlocklist []*backend.CompactedBlockMeta) ([]*tempopb.Trace, []error, error) {
 	// tracing instrumentation
 	logger := log.WithContext(ctx, log.Logger)
 	ctx, span := tracer.Start(ctx, "store.Find")
@@ -300,8 +300,6 @@ func (rw *readerWriter) Find(ctx context.Context, tenantID string, id common.ID,
 	}
 
 	// gather appropriate blocks
-	blocklist := rw.blocklist.Metas(tenantID)
-	compactedBlocklist := rw.blocklist.CompactedMetas(tenantID)
 	copiedBlocklist := make([]interface{}, 0, len(blocklist))
 	blocksSearched := 0
 	compactedBlocksSearched := 0
