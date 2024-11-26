@@ -11,6 +11,7 @@ import (
 	"io"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/streaming"
@@ -198,13 +199,13 @@ func (rw *Azure) List(ctx context.Context, keypath backend.KeyPath) ([]string, e
 }
 
 // ListBlocks implements backend.Reader
-func (rw *Azure) ListBlocks(ctx context.Context, tenant string) ([]uuid.UUID, []uuid.UUID, error) {
+func (rw *Azure) ListBlocks(ctx context.Context, tenant string) (map[uuid.UUID]time.Time, map[uuid.UUID]time.Time, error) {
 	ctx, span := tracer.Start(ctx, "V2.ListBlocks")
 	defer span.End()
 
 	var (
-		blockIDs          = make([]uuid.UUID, 0, 1000)
-		compactedBlockIDs = make([]uuid.UUID, 0, 1000)
+		blockIDs          = make(map[uuid.UUID]time.Time, 1000)
+		compactedBlockIDs = make(map[uuid.UUID]time.Time, 1000)
 		keypath           = backend.KeyPathWithPrefix(backend.KeyPath{tenant}, rw.cfg.Prefix)
 		parts             []string
 		id                uuid.UUID
@@ -250,9 +251,9 @@ func (rw *Azure) ListBlocks(ctx context.Context, tenant string) ([]uuid.UUID, []
 
 			switch parts[1] {
 			case backend.MetaName:
-				blockIDs = append(blockIDs, id)
+				blockIDs[id] = *b.Properties.LastModified
 			case backend.CompactedMetaName:
-				compactedBlockIDs = append(compactedBlockIDs, id)
+				compactedBlockIDs[id] = *b.Properties.LastModified
 			}
 		}
 	}

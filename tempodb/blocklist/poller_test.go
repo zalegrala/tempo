@@ -607,7 +607,7 @@ func TestPollTolerateConsecutiveErrors(t *testing.T) {
 
 			// This mock reader returns error or nil based on the tenant ID
 			r := &backend.MockReader{
-				BlocksFn: func(_ context.Context, tenantID string) ([]uuid.UUID, []uuid.UUID, error) {
+				BlocksFn: func(_ context.Context, tenantID string) (map[uuid.UUID]time.Time, map[uuid.UUID]time.Time, error) {
 					mtx.Lock()
 					defer func() {
 						callCounter[tenantID]++

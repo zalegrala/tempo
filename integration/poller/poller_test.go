@@ -170,7 +170,7 @@ func TestPollerOwnership(t *testing.T) {
 
 					mmResults, cmResults, listBlocksErr := rr.ListBlocks(context.Background(), testTenant)
 					require.NoError(t, listBlocksErr)
-					sort.Slice(mmResults, func(i, j int) bool { return mmResults[i].String() < mmResults[j].String() })
+					// sort.Slice(mmResults, func(i, j int) bool { return mmResults[i].String() < mmResults[j].String() })
 
 					require.Equal(t, tenantExpected[testTenant], mmResults)
 					require.Equal(t, len(tenantExpected[testTenant]), len(mmResults))

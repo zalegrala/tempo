@@ -8,6 +8,7 @@ import (
 	"io"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/uuid"
@@ -115,12 +116,14 @@ func TestReader(t *testing.T) {
 	assert.Equal(t, expectedTenants, actualTenants)
 
 	uuid1, uuid2, uuid3 := uuid.New(), uuid.New(), uuid.New()
-	expectedBlocks := []uuid.UUID{uuid1, uuid2}
-	expectedCompactedBlocks := []uuid.UUID{uuid3}
+	expectedBlocks := map[uuid.UUID]time.Time{uuid1: time.Now(), uuid2: time.Now()}
+	expectedCompactedBlocks := map[uuid.UUID]time.Time{uuid3: time.Now()}
 
-	m.BlockIDs = append(m.BlockIDs, uuid1)
-	m.BlockIDs = append(m.BlockIDs, uuid2)
-	m.CompactedBlockIDs = append(m.CompactedBlockIDs, uuid3)
+	m.BlockIDs = make(map[uuid.UUID]time.Time)
+	m.BlockIDs[uuid1] = expectedBlocks[uuid1]
+	m.BlockIDs[uuid2] = expectedBlocks[uuid2]
+	m.CompactedBlockIDs = make(map[uuid.UUID]time.Time)
+	m.CompactedBlockIDs[uuid3] = expectedCompactedBlocks[uuid3]
 
 	actualBlocks, actualCompactedBlocks, err := r.Blocks(ctx, "test")
 	assert.NoError(t, err)

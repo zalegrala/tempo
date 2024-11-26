@@ -168,7 +168,12 @@ func testStreamingBlockToBackendBlock(t *testing.T, cfg *common.BlockConfig) {
 	require.NoError(t, err, "error listing blocks")
 	require.Len(t, uuids, 1)
 
-	meta, err := r.BlockMeta(context.Background(), uuids[0], testTenantID)
+	keys := make([]uuid.UUID, 0, len(uuids))
+	for id := range uuids {
+		keys = append(keys, id)
+	}
+
+	meta, err := r.BlockMeta(context.Background(), keys[0], testTenantID)
 	require.NoError(t, err, "error getting meta")
 
 	backendBlock, err := NewBackendBlock(meta, r)

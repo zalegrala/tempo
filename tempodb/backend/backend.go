@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
@@ -67,7 +68,7 @@ type Reader interface {
 	// Tenants returns a list of all tenants in a backend
 	Tenants(ctx context.Context) ([]string, error)
 	// Blocks returns the blockIDs, compactedBlockIDs and an error from the backend.
-	Blocks(ctx context.Context, tenantID string) (blockIDs []uuid.UUID, compactedBlockIDs []uuid.UUID, err error)
+	Blocks(ctx context.Context, tenantID string) (blockIDs map[uuid.UUID]time.Time, compactedBlockIDs map[uuid.UUID]time.Time, err error)
 	// BlockMeta returns the blockmeta given a block and tenant id
 	BlockMeta(ctx context.Context, blockID uuid.UUID, tenantID string) (*BlockMeta, error)
 	// TenantIndex returns lists of all metas given a tenant

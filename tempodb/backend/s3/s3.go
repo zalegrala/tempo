@@ -11,6 +11,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
@@ -289,12 +290,12 @@ func (rw *readerWriter) List(_ context.Context, keypath backend.KeyPath) ([]stri
 func (rw *readerWriter) ListBlocks(
 	ctx context.Context,
 	tenant string,
-) ([]uuid.UUID, []uuid.UUID, error) {
+) (map[uuid.UUID]time.Time, map[uuid.UUID]time.Time, error) {
 	ctx, span := tracer.Start(ctx, "readerWriter.ListBlocks")
 	defer span.End()
 
-	blockIDs := make([]uuid.UUID, 0, 1000)
-	compactedBlockIDs := make([]uuid.UUID, 0, 1000)
+	blockIDs := make(map[uuid.UUID]time.Time, 1000)
+	compactedBlockIDs := make(map[uuid.UUID]time.Time, 1000)
 
 	keypath := backend.KeyPathWithPrefix(backend.KeyPath{tenant}, rw.cfg.Prefix)
 	prefix := path.Join(keypath...)
@@ -308,22 +309,22 @@ func (rw *readerWriter) ListBlocks(
 	wg := sync.WaitGroup{}
 	mtx := sync.Mutex{}
 
-	var min uuid.UUID
-	var max uuid.UUID
+	var minUUID uuid.UUID
+	var maxUUID uuid.UUID
 
 	for i := 0; i < len(bb)-1; i++ {
 
-		min = uuid.UUID(bb[i])
-		max = uuid.UUID(bb[i+1])
+		minUUID = uuid.UUID(bb[i])
+		maxUUID = uuid.UUID(bb[i+1])
 
 		wg.Add(1)
-		go func(min, max uuid.UUID) {
+		go func(minUUID, maxUUID uuid.UUID) {
 			defer wg.Done()
 
 			var (
 				err        error
 				res        minio.ListBucketV2Result
-				startAfter = prefix + min.String()
+				startAfter = prefix + minUUID.String()
 			)
 
 			for res.IsTruncated = true; res.IsTruncated; {
@@ -356,13 +357,13 @@ func (rw *readerWriter) ListBlocks(
 						continue
 					}
 
-					if bytes.Compare(id[:], min[:]) < 0 {
+					if bytes.Compare(id[:], minUUID[:]) < 0 {
 						errChan <- fmt.Errorf("block UUID below shard minimum")
 						return
 					}
 
-					if max != backend.GlobalMaxBlockID {
-						if bytes.Compare(id[:], max[:]) >= 0 {
+					if maxUUID != backend.GlobalMaxBlockID {
+						if bytes.Compare(id[:], maxUUID[:]) >= 0 {
 							return
 						}
 					}
@@ -370,14 +371,14 @@ func (rw *readerWriter) ListBlocks(
 					mtx.Lock()
 					switch parts[1] {
 					case backend.MetaName:
-						blockIDs = append(blockIDs, id)
+						blockIDs[id] = c.LastModified
 					case backend.CompactedMetaName:
-						compactedBlockIDs = append(compactedBlockIDs, id)
+						compactedBlockIDs[id] = c.LastModified
 					}
 					mtx.Unlock()
 				}
 			}
-		}(min, max)
+		}(minUUID, maxUUID)
 	}
 	wg.Wait()
 	close(errChan)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/grafana/tempo/tempodb/backend"
@@ -23,7 +24,12 @@ func TestRawIteratorReadsAllRows(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, blocks, 1)
 
-	meta, err := r.BlockMeta(ctx, blocks[0], "single-tenant")
+	keys := make([]uuid.UUID, 0, len(blocks))
+	for id := range blocks {
+		keys = append(keys, id)
+	}
+
+	meta, err := r.BlockMeta(ctx, keys[0], "single-tenant")
 	require.NoError(t, err)
 
 	b := newBackendBlock(meta, r)

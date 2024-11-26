@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
@@ -196,7 +197,7 @@ func (rw *readerWriter) List(ctx context.Context, keypath backend.KeyPath) ([]st
 }
 
 // ListBlocks implements backend.Reader
-func (rw *readerWriter) ListBlocks(ctx context.Context, tenant string) ([]uuid.UUID, []uuid.UUID, error) {
+func (rw *readerWriter) ListBlocks(ctx context.Context, tenant string) (map[uuid.UUID]time.Time, map[uuid.UUID]time.Time, error) {
 	ctx, span := tracer.Start(ctx, "readerWriter.ListBlocks")
 	defer span.End()
 
@@ -208,8 +209,8 @@ func (rw *readerWriter) ListBlocks(ctx context.Context, tenant string) ([]uuid.U
 		keypath           = backend.KeyPathWithPrefix(backend.KeyPath{tenant}, rw.cfg.Prefix)
 		min               uuid.UUID
 		max               uuid.UUID
-		blockIDs          = make([]uuid.UUID, 0, 1000)
-		compactedBlockIDs = make([]uuid.UUID, 0, 1000)
+		blockIDs          = make(map[uuid.UUID]time.Time, 1000)
+		compactedBlockIDs = make(map[uuid.UUID]time.Time, 1000)
 	)
 
 	prefix := path.Join(keypath...)
@@ -290,9 +291,9 @@ func (rw *readerWriter) ListBlocks(ctx context.Context, tenant string) ([]uuid.U
 				mtx.Lock()
 				switch parts[1] {
 				case backend.MetaName:
-					blockIDs = append(blockIDs, id)
+					blockIDs[id] = attrs.Updated
 				case backend.CompactedMetaName:
-					compactedBlockIDs = append(compactedBlockIDs, id)
+					compactedBlockIDs[id] = attrs.Updated
 				}
 				mtx.Unlock()
 			}

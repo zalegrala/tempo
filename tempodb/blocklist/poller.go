@@ -339,7 +339,7 @@ func (p *Poller) pollTenantBlocks(
 	}
 
 	// The boolean here to track if we know the block has been compacted
-	for _, blockID := range currentBlockIDs {
+	for blockID := range currentBlockIDs {
 		// if we already have this block id in our previous list, use the existing data.
 		if v, ok := mm[backend.UUID(blockID)]; ok {
 			newBlockList = append(newBlockList, v)
@@ -349,7 +349,7 @@ func (p *Poller) pollTenantBlocks(
 
 	}
 
-	for _, blockID := range currentCompactedBlockIDs {
+	for blockID := range currentCompactedBlockIDs {
 		// if we already have this block id in our previous list, use the existing data.
 		if v, ok := cm[backend.UUID(blockID)]; ok {
 			newCompactedBlocklist = append(newCompactedBlocklist, v)

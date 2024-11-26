@@ -764,7 +764,7 @@ func (p *Processor) reloadBlocks() error {
 	}
 	level.Info(p.logger).Log("msg", "reloading complete blocks", "count", len(ids))
 
-	for _, id := range ids {
+	for id := range ids {
 		level.Info(p.logger).Log("msg", "reloading complete block", "block", id.String())
 		meta, err := r.BlockMeta(ctx, id, t)
 

@@ -59,7 +59,7 @@ type RawReader interface {
 	// List returns all objects one level beneath the provided keypath
 	List(ctx context.Context, keypath KeyPath) ([]string, error)
 	// ListBlocks returns all blockIDs and compactedBlockIDs for a tenant.
-	ListBlocks(ctx context.Context, tenant string) (blockIDs []uuid.UUID, compactedBlockIDs []uuid.UUID, err error)
+	ListBlocks(ctx context.Context, tenant string) (blockIDs map[uuid.UUID]time.Time, compactedBlockIDs map[uuid.UUID]time.Time, err error)
 	// Find executes the FindFunc for each object in the backend starting at the specified keypath.  Collection of these objects is the callers responsibility.
 	Find(ctx context.Context, keypath KeyPath, f FindFunc) error
 	// Read is for streaming entire objects from the backend.  There will be an attempt to retrieve this from cache if shouldCache is true.
@@ -215,7 +215,7 @@ func (r *reader) Tenants(ctx context.Context) ([]string, error) {
 }
 
 // Blocks implements backend.Reader
-func (r *reader) Blocks(ctx context.Context, tenantID string) ([]uuid.UUID, []uuid.UUID, error) {
+func (r *reader) Blocks(ctx context.Context, tenantID string) (map[uuid.UUID]time.Time, map[uuid.UUID]time.Time, error) {
 	return r.r.ListBlocks(ctx, tenantID)
 }
 

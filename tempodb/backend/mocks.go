@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 
 	tempo_io "github.com/grafana/tempo/pkg/io"
 
@@ -24,14 +25,14 @@ var (
 type MockRawReader struct {
 	L            []string
 	ListFn       func(ctx context.Context, keypath KeyPath) ([]string, error)
-	ListBlocksFn func(ctx context.Context, tenant string) ([]uuid.UUID, []uuid.UUID, error)
+	ListBlocksFn func(ctx context.Context, tenant string) (map[uuid.UUID]time.Time, map[uuid.UUID]time.Time, error)
 	R            []byte // read
 	Range        []byte // ReadRange
 	ReadFn       func(ctx context.Context, name string, keypath KeyPath, cacheInfo *CacheInfo) (io.ReadCloser, int64, error)
 	DeleteResult []string
 
-	BlockIDs          []uuid.UUID
-	CompactedBlockIDs []uuid.UUID
+	BlockIDs          map[uuid.UUID]time.Time
+	CompactedBlockIDs map[uuid.UUID]time.Time
 }
 
 func (m *MockRawReader) List(ctx context.Context, keypath KeyPath) ([]string, error) {
@@ -42,7 +43,7 @@ func (m *MockRawReader) List(ctx context.Context, keypath KeyPath) ([]string, er
 	return m.L, nil
 }
 
-func (m *MockRawReader) ListBlocks(ctx context.Context, tenant string) ([]uuid.UUID, []uuid.UUID, error) {
+func (m *MockRawReader) ListBlocks(ctx context.Context, tenant string) (map[uuid.UUID]time.Time, map[uuid.UUID]time.Time, error) {
 	if m.ListBlocksFn != nil {
 		return m.ListBlocksFn(ctx, tenant)
 	}
@@ -154,7 +155,7 @@ type MockReader struct {
 	sync.Mutex
 
 	T                 []string
-	BlocksFn          func(ctx context.Context, tenantID string) ([]uuid.UUID, []uuid.UUID, error)
+	BlocksFn          func(ctx context.Context, tenantID string) (map[uuid.UUID]time.Time, map[uuid.UUID]time.Time, error)
 	M                 *BlockMeta // meta
 	BlockMetaFn       func(ctx context.Context, blockID uuid.UUID, tenantID string) (*BlockMeta, error)
 	TenantIndexFn     func(ctx context.Context, tenantID string) (*TenantIndex, error)
@@ -162,8 +163,8 @@ type MockReader struct {
 	Range             []byte // ReadRange
 	ReadFn            func(name string, blockID uuid.UUID, tenantID string) ([]byte, error)
 	BlockMetaCalls    map[string]map[uuid.UUID]int
-	BlockIDs          []uuid.UUID // blocks
-	CompactedBlockIDs []uuid.UUID // blocks
+	BlockIDs          map[uuid.UUID]time.Time // blocks
+	CompactedBlockIDs map[uuid.UUID]time.Time // blocks
 }
 
 func (m *MockReader) Find(_ context.Context, _ KeyPath, _ FindFunc) error {
@@ -174,7 +175,7 @@ func (m *MockReader) Tenants(context.Context) ([]string, error) {
 	return m.T, nil
 }
 
-func (m *MockReader) Blocks(ctx context.Context, tenantID string) ([]uuid.UUID, []uuid.UUID, error) {
+func (m *MockReader) Blocks(ctx context.Context, tenantID string) (map[uuid.UUID]time.Time, map[uuid.UUID]time.Time, error) {
 	if m.BlocksFn != nil {
 		return m.BlocksFn(ctx, tenantID)
 	}

@@ -595,7 +595,7 @@ func (i *instance) rediscoverLocalBlocks(ctx context.Context) ([]*LocalBlock, er
 
 	var rediscoveredBlocks []*LocalBlock
 
-	for _, id := range ids {
+	for id := range ids {
 		// Ignore blocks that have a matching wal. The wal will be replayed and the local block recreated.
 		// NOTE - Wal replay must be done beforehand.
 		if hasWal(id) {

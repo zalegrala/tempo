@@ -50,7 +50,7 @@ func TestFixtures(t *testing.T) {
 	require.Len(t, listCompactedMetas, 1)
 
 	blockMetas := make([]*backend.BlockMeta, 0, len(listMetas))
-	for _, u := range listMetas {
+	for u := range listMetas {
 		m, e := r.BlockMeta(ctx, u, tenant)
 		require.NoError(t, e)
 		blockMetas = append(blockMetas, m)
@@ -58,7 +58,7 @@ func TestFixtures(t *testing.T) {
 	}
 
 	compactedBlockMetas := make([]*backend.CompactedBlockMeta, 0, len(listCompactedMetas))
-	for _, u := range listCompactedMetas {
+	for u := range listCompactedMetas {
 		m, e := rc.CompactedBlockMeta(u, tenant)
 		assert.NoError(t, e)
 		compactedBlockMetas = append(compactedBlockMetas, m)

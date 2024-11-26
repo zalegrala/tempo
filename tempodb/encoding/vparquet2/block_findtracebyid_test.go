@@ -116,7 +116,12 @@ func TestBackendBlockFindTraceByID_TestData(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, blocks, 1)
 
-	meta, err := r.BlockMeta(ctx, blocks[0], "single-tenant")
+	keys := make([]uuid.UUID, 0, len(blocks))
+	for id := range blocks {
+		keys = append(keys, id)
+	}
+
+	meta, err := r.BlockMeta(ctx, keys[0], "single-tenant")
 	require.NoError(t, err)
 
 	b := newBackendBlock(meta, r)

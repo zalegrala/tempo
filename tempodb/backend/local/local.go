@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
@@ -156,7 +157,9 @@ func (rw *Backend) List(ctx context.Context, keypath backend.KeyPath) ([]string,
 }
 
 // ListBlocks implements backend.Reader
-func (rw *Backend) ListBlocks(_ context.Context, tenant string) (metas []uuid.UUID, compactedMetas []uuid.UUID, err error) {
+func (rw *Backend) ListBlocks(_ context.Context, tenant string) (metas map[uuid.UUID]time.Time, compactedMetas map[uuid.UUID]time.Time, err error) {
+	metas = make(map[uuid.UUID]time.Time)
+	compactedMetas = make(map[uuid.UUID]time.Time)
 	rootPath := rw.rootPath(backend.KeyPath{tenant})
 	fff := os.DirFS(rootPath)
 	err = fs.WalkDir(fff, ".", func(path string, d fs.DirEntry, err error) error {
@@ -181,11 +184,16 @@ func (rw *Backend) ListBlocks(_ context.Context, tenant string) (metas []uuid.UU
 			return err
 		}
 
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+
 		switch parts[2] {
 		case backend.MetaName:
-			metas = append(metas, id)
+			metas[id] = info.ModTime()
 		case backend.CompactedMetaName:
-			compactedMetas = append(compactedMetas, id)
+			compactedMetas[id] = info.ModTime()
 		}
 
 		return nil

@@ -5,6 +5,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/parquet-go/parquet-go"
 	"github.com/stretchr/testify/require"
 
@@ -45,7 +46,12 @@ func TestParquetGoSetsMetadataSections(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, blocks, 1)
 
-	meta, err := r.BlockMeta(ctx, blocks[0], tenantID)
+	keys := make([]uuid.UUID, 0, len(blocks))
+	for id := range blocks {
+		keys = append(keys, id)
+	}
+
+	meta, err := r.BlockMeta(ctx, keys[0], tenantID)
 	require.NoError(t, err)
 
 	br := NewBackendReaderAt(ctx, r, DataFileName, meta)
