@@ -1287,19 +1287,19 @@ func newMockReader(list PerTenant, compactedList PerTenantCompacted, expectsErro
 
 	return &backend.MockReader{
 		T: tenants,
-		BlocksFn: func(_ context.Context, tenantID string) ([]uuid.UUID, []uuid.UUID, error) {
+		BlocksFn: func(_ context.Context, tenantID string) (map[uuid.UUID]time.Time, map[uuid.UUID]time.Time, error) {
 			if expectsError {
 				return nil, nil, errors.New("err")
 			}
 			blocks := list[tenantID]
-			uuids := []uuid.UUID{}
-			compactedUUIDs := []uuid.UUID{}
+			uuids := map[uuid.UUID]time.Time{}
+			compactedUUIDs := map[uuid.UUID]time.Time{}
 			for _, b := range blocks {
-				uuids = append(uuids, (uuid.UUID)(b.BlockID))
+				uuids[(uuid.UUID)(b.BlockID)] = time.Now()
 			}
 			compactedBlocks := compactedList[tenantID]
 			for _, b := range compactedBlocks {
-				compactedUUIDs = append(compactedUUIDs, (uuid.UUID)(b.BlockID))
+				compactedUUIDs[(uuid.UUID)(b.BlockID)] = time.Now()
 			}
 
 			return uuids, compactedUUIDs, nil
