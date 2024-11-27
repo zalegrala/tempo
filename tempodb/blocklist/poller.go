@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/rand"
 	"path"
-	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -121,6 +120,9 @@ type Poller struct {
 
 	sharder JobSharder
 	logger  log.Logger
+
+	metaPool          sync.Pool
+	compactedMetaPool sync.Pool
 }
 
 // NewPoller creates the Poller
@@ -133,6 +135,9 @@ func NewPoller(cfg *PollerConfig, sharder JobSharder, reader backend.Reader, com
 		cfg:     cfg,
 		sharder: sharder,
 		logger:  logger,
+
+		metaPool:          sync.Pool{New: func() any { t := make([]*backend.BlockMeta, 0, 1000); return &t }},
+		compactedMetaPool: sync.Pool{New: func() any { t := make([]*backend.CompactedBlockMeta, 0, 1000); return &t }},
 	}
 }
 
@@ -181,13 +186,57 @@ func (p *Poller) Do(previous *List) (PerTenant, PerTenantCompacted, error) {
 
 			var (
 				consecutiveErrorsRemaining = p.cfg.TolerateConsecutiveErrors
-				newBlockList               = make([]*backend.BlockMeta, 0)
-				newCompactedBlockList      = make([]*backend.CompactedBlockMeta, 0)
-				err                        error
+				// TODO: pool here.  Since we create a new slice each time, we aren't saving the allocation from the previous iteration.
+				// newBlockList          = make([]*backend.BlockMeta, 0)
+				// newCompactedBlockList = make([]*backend.CompactedBlockMeta, 0)
+				err error
 			)
 
+			// mmPtr := p.metaPool.Get().(*[]*backend.BlockMeta)
+			// if mmPtr == nil {
+			// 	*mmPtr = make([]*backend.BlockMeta, 0, 1000)
+			// }
+			// newBlockList := *mmPtr
+			// clear(newBlockList)
+			// defer func() {
+			// 	*mmPtr = newBlockList
+			// 	p.metaPool.Put(mmPtr)
+			// }()
+			//
+			// cmPtr := p.compactedMetaPool.Get().(*[]*backend.CompactedBlockMeta)
+			// if cmPtr == nil {
+			// 	*cmPtr = make([]*backend.CompactedBlockMeta, 0, 1000)
+			// }
+			// newCompactedBlockList := *cmPtr
+			// clear(newCompactedBlockList)
+			// defer func() {
+			// 	*cmPtr = newCompactedBlockList
+			// 	p.compactedMetaPool.Put(cmPtr)
+			// }()
+
+			// NOTE: Testing again
+			newBlockList := p.metaPool.Get().(*[]*backend.BlockMeta)
+			if newBlockList == nil {
+				*newBlockList = make([]*backend.BlockMeta, 0, 1000)
+			}
+			// clear(*newBlockList)
+			*newBlockList = (*newBlockList)[0:0]
+			defer func() {
+				p.metaPool.Put(newBlockList)
+			}()
+
+			newCompactedBlockList := p.compactedMetaPool.Get().(*[]*backend.CompactedBlockMeta)
+			if newCompactedBlockList == nil {
+				*newCompactedBlockList = make([]*backend.CompactedBlockMeta, 0, 1000)
+			}
+			// clear(*newCompactedBlockList)
+			*newCompactedBlockList = (*newCompactedBlockList)[0:0]
+			defer func() {
+				p.compactedMetaPool.Put(newCompactedBlockList)
+			}()
+
 			for consecutiveErrorsRemaining >= 0 {
-				newBlockList, newCompactedBlockList, err = p.pollTenantAndCreateIndex(ctx, tenantID, previous)
+				err = p.pollTenantAndCreateIndex(ctx, tenantID, previous, newBlockList, newCompactedBlockList)
 				if err == nil {
 					break
 				}
@@ -208,13 +257,13 @@ func (p *Poller) Do(previous *List) (PerTenant, PerTenantCompacted, error) {
 				return
 			}
 
-			if len(newBlockList) > 0 || len(newCompactedBlockList) > 0 {
-				blocklist[tenantID] = newBlockList
-				compactedBlocklist[tenantID] = newCompactedBlockList
+			if len(*newBlockList) > 0 || len(*newCompactedBlockList) > 0 {
+				blocklist[tenantID] = *newBlockList
+				compactedBlocklist[tenantID] = *newCompactedBlockList
 
-				metricBlocklistLength.WithLabelValues(tenantID).Set(float64(len(newBlockList)))
+				metricBlocklistLength.WithLabelValues(tenantID).Set(float64(len(*newBlockList)))
 
-				backendMetaMetrics := sumTotalBackendMetaMetrics(newBlockList, newCompactedBlockList)
+				backendMetaMetrics := sumTotalBackendMetaMetrics(*newBlockList, *newCompactedBlockList)
 				metricBackendObjects.WithLabelValues(tenantID, blockStatusLiveLabel).Set(float64(backendMetaMetrics.blockMetaTotalObjects))
 				metricBackendObjects.WithLabelValues(tenantID, blockStatusCompactedLabel).Set(float64(backendMetaMetrics.compactedBlockMetaTotalObjects))
 				metricBackendBytes.WithLabelValues(tenantID, blockStatusLiveLabel).Set(float64(backendMetaMetrics.blockMetaTotalBytes))
@@ -241,7 +290,9 @@ func (p *Poller) pollTenantAndCreateIndex(
 	ctx context.Context,
 	tenantID string,
 	previous *List,
-) ([]*backend.BlockMeta, []*backend.CompactedBlockMeta, error) {
+	newBlockList *[]*backend.BlockMeta,
+	newCompactedBlockList *[]*backend.CompactedBlockMeta,
+) error {
 	derivedCtx, span := tracer.Start(ctx, "Poller.pollTenantAndCreateIndex", trace.WithAttributes(attribute.String("tenant", tenantID)))
 	defer span.End()
 
@@ -260,7 +311,9 @@ func (p *Poller) pollTenantAndCreateIndex(
 
 			span.SetAttributes(attribute.Int("metas", len(i.Meta)))
 			span.SetAttributes(attribute.Int("compactedMetas", len(i.CompactedMeta)))
-			return i.Meta, i.CompactedMeta, nil
+			*newBlockList = append(*newBlockList, i.Meta...)
+			*newCompactedBlockList = append(*newCompactedBlockList, i.CompactedMeta...)
+			return nil
 		}
 
 		metricTenantIndexErrors.WithLabelValues(tenantID).Inc()
@@ -268,7 +321,7 @@ func (p *Poller) pollTenantAndCreateIndex(
 
 		// there was an error, return the error if we're not supposed to fallback to polling
 		if !p.cfg.PollFallback {
-			return nil, nil, fmt.Errorf("failed to pull tenant index and no fallback configured: %w", err)
+			return fmt.Errorf("failed to pull tenant index and no fallback configured: %w", err)
 		}
 
 		// polling fallback is true, log the error and continue in this method to completely poll the backend
@@ -279,52 +332,57 @@ func (p *Poller) pollTenantAndCreateIndex(
 	// there was a failure to pull the tenant index and we are configured to fall
 	// back to polling.
 	metricTenantIndexBuilder.WithLabelValues(tenantID).Set(1)
-	blocklist, compactedBlocklist, err := p.pollTenantBlocks(derivedCtx, tenantID, previous)
+
+	// spew.Dump("before", newBlockList)
+	err := p.pollTenantBlocks(derivedCtx, tenantID, previous, newBlockList, newCompactedBlockList)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to poll tenant blocks: %w", err)
+		return fmt.Errorf("failed to poll tenant blocks: %w", err)
 	}
+	// spew.Dump("after", newBlockList)
 
 	// everything is happy, write this tenant index
-	level.Info(p.logger).Log("msg", "writing tenant index", "tenant", tenantID, "metas", len(blocklist), "compactedMetas", len(compactedBlocklist))
-	err = p.writer.WriteTenantIndex(derivedCtx, tenantID, blocklist, compactedBlocklist)
+	level.Info(p.logger).Log("msg", "writing tenant index", "tenant", tenantID, "metas", len(*newBlockList), "compactedMetas", len(*newCompactedBlockList))
+	err = p.writer.WriteTenantIndex(derivedCtx, tenantID, *newBlockList, *newCompactedBlockList)
 	if err != nil {
 		metricTenantIndexErrors.WithLabelValues(tenantID).Inc()
 		level.Error(p.logger).Log("msg", "failed to write tenant index", "tenant", tenantID, "err", err)
 	}
 
-	if len(blocklist) == 0 && len(compactedBlocklist) == 0 {
+	if len(*newBlockList) == 0 && len(*newCompactedBlockList) == 0 {
 		err := p.deleteTenant(ctx, tenantID)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to delete tenant: %w", err)
+			return fmt.Errorf("failed to delete tenant: %w", err)
 		}
 	}
 
 	metricTenantIndexAgeSeconds.WithLabelValues(tenantID).Set(0)
 
-	return blocklist, compactedBlocklist, nil
+	return nil
 }
 
 func (p *Poller) pollTenantBlocks(
 	ctx context.Context,
 	tenantID string,
 	previous *List,
-) ([]*backend.BlockMeta, []*backend.CompactedBlockMeta, error) {
+	newBlockList *[]*backend.BlockMeta,
+	newCompactedBlockList *[]*backend.CompactedBlockMeta,
+) error {
 	derivedCtx, span := tracer.Start(ctx, "Poller.pollTenantBlocks")
 	defer span.End()
 
 	currentBlockIDs, currentCompactedBlockIDs, err := p.reader.Blocks(derivedCtx, tenantID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed listing tenant blocks: %w", err)
+		return fmt.Errorf("failed listing tenant blocks: %w", err)
 	}
 
 	var (
-		metas                 = previous.Metas(tenantID)
-		compactedMetas        = previous.CompactedMetas(tenantID)
-		mm                    = make(map[backend.UUID]*backend.BlockMeta, len(metas))
-		cm                    = make(map[backend.UUID]*backend.CompactedBlockMeta, len(compactedMetas))
-		newBlockList          = make([]*backend.BlockMeta, 0, len(currentBlockIDs))
-		newCompactedBlocklist = make([]*backend.CompactedBlockMeta, 0, len(currentCompactedBlockIDs))
-		unknownBlockIDs       = make(map[uuid.UUID]bool, 1000)
+		metas          = previous.Metas(tenantID)
+		compactedMetas = previous.CompactedMetas(tenantID)
+		mm             = make(map[backend.UUID]*backend.BlockMeta, len(metas))
+		cm             = make(map[backend.UUID]*backend.CompactedBlockMeta, len(compactedMetas))
+		// newBlockList          = make([]*backend.BlockMeta, 0, len(currentBlockIDs))
+		// newCompactedBlocklist = make([]*backend.CompactedBlockMeta, 0, len(currentCompactedBlockIDs))
+		unknownBlockIDs = make(map[uuid.UUID]bool, 1000)
 	)
 
 	span.SetAttributes(attribute.Int("metas", len(metas)))
@@ -342,7 +400,7 @@ func (p *Poller) pollTenantBlocks(
 	for blockID := range currentBlockIDs {
 		// if we already have this block id in our previous list, use the existing data.
 		if v, ok := mm[backend.UUID(blockID)]; ok {
-			newBlockList = append(newBlockList, v)
+			*newBlockList = append(*newBlockList, v)
 			continue
 		}
 		unknownBlockIDs[blockID] = false
@@ -352,9 +410,20 @@ func (p *Poller) pollTenantBlocks(
 	for blockID := range currentCompactedBlockIDs {
 		// if we already have this block id in our previous list, use the existing data.
 		if v, ok := cm[backend.UUID(blockID)]; ok {
-			newCompactedBlocklist = append(newCompactedBlocklist, v)
+			*newCompactedBlockList = append(*newCompactedBlockList, v)
 			continue
 		}
+
+		// If we know this block from the previous non-compacted list, use the block information and fudge the compacted time based on the object modification time.
+		// if v, ok := mm[backend.UUID(blockID)]; ok {
+		// 	if v != nil {
+		// 		newCompactedBlocklist = append(newCompactedBlocklist, &backend.CompactedBlockMeta{
+		// 			BlockMeta:     *v,
+		// 			CompactedTime: t,
+		// 		})
+		// 		continue
+		// 	}
+		// }
 
 		// TODO: Review the ability  to avoid polling for compacted blocks that we
 		// know about.  We need to know the compacted time, but perhaps there is
@@ -364,42 +433,43 @@ func (p *Poller) pollTenantBlocks(
 
 	}
 
-	newM, newCm, err := p.pollUnknown(derivedCtx, unknownBlockIDs, tenantID)
+	err = p.pollUnknown(derivedCtx, unknownBlockIDs, tenantID, newBlockList, newCompactedBlockList)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed reading unknown blocks: %w", err)
+		return fmt.Errorf("failed reading unknown blocks: %w", err)
 	}
 
-	newBlockList = append(newBlockList, newM...)
-	newCompactedBlocklist = append(newCompactedBlocklist, newCm...)
+	// newBlockList = append(newBlockList, newM...)
+	// newCompactedBlockList = append(newCompactedBlockList, newCm...)
 
-	sort.Slice(newBlockList, func(i, j int) bool {
-		return newBlockList[i].StartTime.Before(newBlockList[j].StartTime)
-	})
+	// FIXME: we need to sort the list
+	// sort.Slice(*newBlockList, func(i, j int) bool {
+	// 	return (*newBlockList)[i].StartTime.Before((*newBlockList)[j].StartTime)
+	// })
+	//
+	// sort.Slice(*newCompactedBlockList, func(i, j int) bool {
+	// 	return (*newCompactedBlockList)[i].StartTime.Before((*newCompactedBlockList)[j].StartTime)
+	// })
 
-	sort.Slice(newCompactedBlocklist, func(i, j int) bool {
-		return newCompactedBlocklist[i].StartTime.Before(newCompactedBlocklist[j].StartTime)
-	})
-
-	return newBlockList, newCompactedBlocklist, nil
+	return nil
 }
 
 func (p *Poller) pollUnknown(
 	ctx context.Context,
 	unknownBlocks map[uuid.UUID]bool,
 	tenantID string,
-) ([]*backend.BlockMeta, []*backend.CompactedBlockMeta, error) {
+	newBlockList *[]*backend.BlockMeta,
+	newCompactedBlocklist *[]*backend.CompactedBlockMeta,
+) error {
 	derivedCtx, span := tracer.Start(ctx, "pollUnknown", trace.WithAttributes(
 		attribute.Int("unknownBlockIDs", len(unknownBlocks)),
 	))
 	defer span.End()
 
 	var (
-		err                   error
-		errs                  []error
-		mtx                   sync.Mutex
-		bg                    = boundedwaitgroup.New(p.cfg.PollConcurrency)
-		newBlockList          = make([]*backend.BlockMeta, 0, len(unknownBlocks))
-		newCompactedBlocklist = make([]*backend.CompactedBlockMeta, 0, len(unknownBlocks))
+		err  error
+		errs []error
+		mtx  sync.Mutex
+		bg   = boundedwaitgroup.New(p.cfg.PollConcurrency)
 	)
 
 	for blockID, compacted := range unknownBlocks {
@@ -423,12 +493,12 @@ func (p *Poller) pollUnknown(
 			mtx.Lock()
 			defer mtx.Unlock()
 			if m != nil {
-				newBlockList = append(newBlockList, m)
+				*newBlockList = append(*newBlockList, m)
 				return
 			}
 
 			if cm != nil {
-				newCompactedBlocklist = append(newCompactedBlocklist, cm)
+				*newCompactedBlocklist = append(*newCompactedBlocklist, cm)
 				return
 			}
 
@@ -446,10 +516,10 @@ func (p *Poller) pollUnknown(
 		span.SetStatus(codes.Error, "")
 		span.RecordError(err)
 
-		return nil, nil, err
+		return err
 	}
 
-	return newBlockList, newCompactedBlocklist, nil
+	return nil
 }
 
 func (p *Poller) pollBlock(

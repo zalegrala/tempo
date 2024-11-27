@@ -180,10 +180,10 @@ func TestTenantIndexBuilder(t *testing.T) {
 			assert.Equal(t, tc.expectedList, actualList)
 			assert.Equal(t, tc.expectedCompactedList, actualCompactedList)
 			if tc.expectsError {
-				assert.Error(t, err)
+				require.Error(t, err)
 				return
 			}
-			assert.NoError(t, err)
+			require.NoError(t, err)
 
 			// confirm tenant index written as expected
 			for tenant, list := range tc.expectedList {
@@ -1007,6 +1007,8 @@ func BenchmarkPoller10k(b *testing.B) {
 		// currentPerTenantCompacted := newPerTenantCompacted(uuids, tc.tenantCount, tc.blocksPerTenant)
 		currentPerTenant := maps.Clone(previousPerTenant)
 		currentPerTenantCompacted := maps.Clone(previousPerTenantCompacted)
+		newBlockList := make([]*backend.BlockMeta, 1000)
+		newCompactedBlockList := make([]*backend.CompactedBlockMeta, 1000)
 
 		var (
 			c        = newMockCompactor(currentPerTenantCompacted, false)
@@ -1027,7 +1029,7 @@ func BenchmarkPoller10k(b *testing.B) {
 		runName := fmt.Sprintf("%d-%d", tc.tenantCount, tc.blocksPerTenant)
 		b.Run(runName, func(b *testing.B) {
 			for tenant := range previousPerTenant {
-				benchmarkPollTenant(b, poller, tenant, previous)
+				benchmarkPollTenant(b, poller, tenant, previous, &newBlockList, &newCompactedBlockList)
 			}
 		})
 	}
@@ -1062,14 +1064,14 @@ func BenchmarkFullPoller(b *testing.B) {
 			iterations:      10,
 			blocksPer:       100,
 		},
-		{
-			name:            "multi tenant growth and compactions",
-			tenants:         10,
-			blocksPerTenant: 1000,
-			iterations:      10,
-			blocksPer:       100,
-			compactionsPer:  10,
-		},
+		// {
+		// 	name:            "multi tenant growth and compactions",
+		// 	tenants:         10,
+		// 	blocksPerTenant: 1000,
+		// 	iterations:      10,
+		// 	blocksPer:       100,
+		// 	compactionsPer:  10,
+		// },
 	}
 
 	for _, bc := range cases {
@@ -1162,10 +1164,10 @@ func BenchmarkFullPoller(b *testing.B) {
 	}
 }
 
-func benchmarkPollTenant(b *testing.B, poller *Poller, tenant string, previous *List) {
+func benchmarkPollTenant(b *testing.B, poller *Poller, tenant string, previous *List, newBlockList *[]*backend.BlockMeta, newCompactedBlockList *[]*backend.CompactedBlockMeta) {
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
-		_, _, err := poller.pollTenantBlocks(context.Background(), tenant, previous)
+		err := poller.pollTenantBlocks(context.Background(), tenant, previous, newBlockList, newCompactedBlockList)
 		require.NoError(b, err)
 	}
 }
