@@ -187,9 +187,9 @@ func (p *Poller) Do(previous *List) (PerTenant, PerTenantCompacted, error) {
 			var (
 				consecutiveErrorsRemaining = p.cfg.TolerateConsecutiveErrors
 				// TODO: pool here.  Since we create a new slice each time, we aren't saving the allocation from the previous iteration.
-				// newBlockList          = make([]*backend.BlockMeta, 0)
-				// newCompactedBlockList = make([]*backend.CompactedBlockMeta, 0)
-				err error
+				newBlockList          = make([]*backend.BlockMeta, 0)
+				newCompactedBlockList = make([]*backend.CompactedBlockMeta, 0)
+				err                   error
 			)
 
 			// mmPtr := p.metaPool.Get().(*[]*backend.BlockMeta)
@@ -215,28 +215,28 @@ func (p *Poller) Do(previous *List) (PerTenant, PerTenantCompacted, error) {
 			// }()
 
 			// NOTE: Testing again
-			newBlockList := p.metaPool.Get().(*[]*backend.BlockMeta)
-			if newBlockList == nil {
-				*newBlockList = make([]*backend.BlockMeta, 0, 1000)
-			}
-			// clear(*newBlockList)
-			*newBlockList = (*newBlockList)[0:0]
-			defer func() {
-				p.metaPool.Put(newBlockList)
-			}()
-
-			newCompactedBlockList := p.compactedMetaPool.Get().(*[]*backend.CompactedBlockMeta)
-			if newCompactedBlockList == nil {
-				*newCompactedBlockList = make([]*backend.CompactedBlockMeta, 0, 1000)
-			}
-			// clear(*newCompactedBlockList)
-			*newCompactedBlockList = (*newCompactedBlockList)[0:0]
-			defer func() {
-				p.compactedMetaPool.Put(newCompactedBlockList)
-			}()
+			// newBlockList := p.metaPool.Get().(*[]*backend.BlockMeta)
+			// if newBlockList == nil {
+			// 	*newBlockList = make([]*backend.BlockMeta, 0, 1000)
+			// }
+			// // clear(*newBlockList)
+			// *newBlockList = (*newBlockList)[0:0]
+			// defer func() {
+			// 	p.metaPool.Put(newBlockList)
+			// }()
+			//
+			// newCompactedBlockList := p.compactedMetaPool.Get().(*[]*backend.CompactedBlockMeta)
+			// if newCompactedBlockList == nil {
+			// 	*newCompactedBlockList = make([]*backend.CompactedBlockMeta, 0, 1000)
+			// }
+			// // clear(*newCompactedBlockList)
+			// *newCompactedBlockList = (*newCompactedBlockList)[0:0]
+			// defer func() {
+			// 	p.compactedMetaPool.Put(newCompactedBlockList)
+			// }()
 
 			for consecutiveErrorsRemaining >= 0 {
-				err = p.pollTenantAndCreateIndex(ctx, tenantID, previous, newBlockList, newCompactedBlockList)
+				err = p.pollTenantAndCreateIndex(ctx, tenantID, previous, &newBlockList, &newCompactedBlockList)
 				if err == nil {
 					break
 				}
@@ -257,13 +257,13 @@ func (p *Poller) Do(previous *List) (PerTenant, PerTenantCompacted, error) {
 				return
 			}
 
-			if len(*newBlockList) > 0 || len(*newCompactedBlockList) > 0 {
-				blocklist[tenantID] = *newBlockList
-				compactedBlocklist[tenantID] = *newCompactedBlockList
+			if len(newBlockList) > 0 || len(newCompactedBlockList) > 0 {
+				blocklist[tenantID] = newBlockList
+				compactedBlocklist[tenantID] = newCompactedBlockList
 
-				metricBlocklistLength.WithLabelValues(tenantID).Set(float64(len(*newBlockList)))
+				metricBlocklistLength.WithLabelValues(tenantID).Set(float64(len(newBlockList)))
 
-				backendMetaMetrics := sumTotalBackendMetaMetrics(*newBlockList, *newCompactedBlockList)
+				backendMetaMetrics := sumTotalBackendMetaMetrics(newBlockList, newCompactedBlockList)
 				metricBackendObjects.WithLabelValues(tenantID, blockStatusLiveLabel).Set(float64(backendMetaMetrics.blockMetaTotalObjects))
 				metricBackendObjects.WithLabelValues(tenantID, blockStatusCompactedLabel).Set(float64(backendMetaMetrics.compactedBlockMetaTotalObjects))
 				metricBackendBytes.WithLabelValues(tenantID, blockStatusLiveLabel).Set(float64(backendMetaMetrics.blockMetaTotalBytes))
