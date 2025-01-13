@@ -11,13 +11,18 @@ import (
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/ottl"
 )
 
+const (
+	ResourceContextName = "resource"
+)
+
 type ResourceContext interface {
 	GetResource() pcommon.Resource
+	GetResourceSchemaURLItem() SchemaURLItem
 }
 
 func ResourcePathGetSetter[K ResourceContext](path ottl.Path[K]) (ottl.GetSetter[K], error) {
 	if path == nil {
-		return accessResource[K](), nil
+		return nil, FormatDefaultErrorMessage(ResourceContextName, ResourceContextName, "Resource", ResourceContextRef)
 	}
 	switch path.Name() {
 	case "attributes":
@@ -27,31 +32,19 @@ func ResourcePathGetSetter[K ResourceContext](path ottl.Path[K]) (ottl.GetSetter
 		return accessResourceAttributesKey[K](path.Keys()), nil
 	case "dropped_attributes_count":
 		return accessResourceDroppedAttributesCount[K](), nil
+	case "schema_url":
+		return accessResourceSchemaURLItem[K](), nil
 	default:
 		return nil, FormatDefaultErrorMessage(path.Name(), path.String(), "Resource", ResourceContextRef)
 	}
 }
 
-func accessResource[K ResourceContext]() ottl.StandardGetSetter[K] {
-	return ottl.StandardGetSetter[K]{
-		Getter: func(ctx context.Context, tCtx K) (any, error) {
-			return tCtx.GetResource(), nil
-		},
-		Setter: func(ctx context.Context, tCtx K, val any) error {
-			if newRes, ok := val.(pcommon.Resource); ok {
-				newRes.CopyTo(tCtx.GetResource())
-			}
-			return nil
-		},
-	}
-}
-
 func accessResourceAttributes[K ResourceContext]() ottl.StandardGetSetter[K] {
 	return ottl.StandardGetSetter[K]{
-		Getter: func(ctx context.Context, tCtx K) (any, error) {
+		Getter: func(_ context.Context, tCtx K) (any, error) {
 			return tCtx.GetResource().Attributes(), nil
 		},
-		Setter: func(ctx context.Context, tCtx K, val any) error {
+		Setter: func(_ context.Context, tCtx K, val any) error {
 			if attrs, ok := val.(pcommon.Map); ok {
 				attrs.CopyTo(tCtx.GetResource().Attributes())
 			}
@@ -73,12 +66,26 @@ func accessResourceAttributesKey[K ResourceContext](keys []ottl.Key[K]) ottl.Sta
 
 func accessResourceDroppedAttributesCount[K ResourceContext]() ottl.StandardGetSetter[K] {
 	return ottl.StandardGetSetter[K]{
-		Getter: func(ctx context.Context, tCtx K) (any, error) {
+		Getter: func(_ context.Context, tCtx K) (any, error) {
 			return int64(tCtx.GetResource().DroppedAttributesCount()), nil
 		},
-		Setter: func(ctx context.Context, tCtx K, val any) error {
+		Setter: func(_ context.Context, tCtx K, val any) error {
 			if i, ok := val.(int64); ok {
 				tCtx.GetResource().SetDroppedAttributesCount(uint32(i))
+			}
+			return nil
+		},
+	}
+}
+
+func accessResourceSchemaURLItem[K ResourceContext]() ottl.StandardGetSetter[K] {
+	return ottl.StandardGetSetter[K]{
+		Getter: func(_ context.Context, tCtx K) (any, error) {
+			return tCtx.GetResourceSchemaURLItem().SchemaUrl(), nil
+		},
+		Setter: func(_ context.Context, tCtx K, val any) error {
+			if schemaURL, ok := val.(string); ok {
+				tCtx.GetResourceSchemaURLItem().SetSchemaUrl(schemaURL)
 			}
 			return nil
 		},
