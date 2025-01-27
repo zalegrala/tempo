@@ -11,6 +11,10 @@ import (
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/ottl"
 )
 
+const (
+	MetricContextName = "metric"
+)
+
 type MetricContext interface {
 	GetMetric() pmetric.Metric
 }
@@ -29,7 +33,7 @@ var MetricSymbolTable = map[ottl.EnumSymbol]ottl.Enum{
 
 func MetricPathGetSetter[K MetricContext](path ottl.Path[K]) (ottl.GetSetter[K], error) {
 	if path == nil {
-		return accessMetric[K](), nil
+		return nil, FormatDefaultErrorMessage(MetricContextName, MetricContextName, "Metric", MetricRef)
 	}
 	switch path.Name() {
 	case "name":
@@ -51,26 +55,12 @@ func MetricPathGetSetter[K MetricContext](path ottl.Path[K]) (ottl.GetSetter[K],
 	}
 }
 
-func accessMetric[K MetricContext]() ottl.StandardGetSetter[K] {
-	return ottl.StandardGetSetter[K]{
-		Getter: func(ctx context.Context, tCtx K) (any, error) {
-			return tCtx.GetMetric(), nil
-		},
-		Setter: func(ctx context.Context, tCtx K, val any) error {
-			if newMetric, ok := val.(pmetric.Metric); ok {
-				newMetric.CopyTo(tCtx.GetMetric())
-			}
-			return nil
-		},
-	}
-}
-
 func accessName[K MetricContext]() ottl.StandardGetSetter[K] {
 	return ottl.StandardGetSetter[K]{
-		Getter: func(ctx context.Context, tCtx K) (any, error) {
+		Getter: func(_ context.Context, tCtx K) (any, error) {
 			return tCtx.GetMetric().Name(), nil
 		},
-		Setter: func(ctx context.Context, tCtx K, val any) error {
+		Setter: func(_ context.Context, tCtx K, val any) error {
 			if str, ok := val.(string); ok {
 				tCtx.GetMetric().SetName(str)
 			}
@@ -81,10 +71,10 @@ func accessName[K MetricContext]() ottl.StandardGetSetter[K] {
 
 func accessDescription[K MetricContext]() ottl.StandardGetSetter[K] {
 	return ottl.StandardGetSetter[K]{
-		Getter: func(ctx context.Context, tCtx K) (any, error) {
+		Getter: func(_ context.Context, tCtx K) (any, error) {
 			return tCtx.GetMetric().Description(), nil
 		},
-		Setter: func(ctx context.Context, tCtx K, val any) error {
+		Setter: func(_ context.Context, tCtx K, val any) error {
 			if str, ok := val.(string); ok {
 				tCtx.GetMetric().SetDescription(str)
 			}
@@ -95,10 +85,10 @@ func accessDescription[K MetricContext]() ottl.StandardGetSetter[K] {
 
 func accessUnit[K MetricContext]() ottl.StandardGetSetter[K] {
 	return ottl.StandardGetSetter[K]{
-		Getter: func(ctx context.Context, tCtx K) (any, error) {
+		Getter: func(_ context.Context, tCtx K) (any, error) {
 			return tCtx.GetMetric().Unit(), nil
 		},
-		Setter: func(ctx context.Context, tCtx K, val any) error {
+		Setter: func(_ context.Context, tCtx K, val any) error {
 			if str, ok := val.(string); ok {
 				tCtx.GetMetric().SetUnit(str)
 			}
@@ -109,10 +99,10 @@ func accessUnit[K MetricContext]() ottl.StandardGetSetter[K] {
 
 func accessType[K MetricContext]() ottl.StandardGetSetter[K] {
 	return ottl.StandardGetSetter[K]{
-		Getter: func(ctx context.Context, tCtx K) (any, error) {
+		Getter: func(_ context.Context, tCtx K) (any, error) {
 			return int64(tCtx.GetMetric().Type()), nil
 		},
-		Setter: func(ctx context.Context, tCtx K, val any) error {
+		Setter: func(_ context.Context, _ K, _ any) error {
 			// TODO Implement methods so correctly convert data types.
 			// https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/10130
 			return nil
@@ -122,7 +112,7 @@ func accessType[K MetricContext]() ottl.StandardGetSetter[K] {
 
 func accessAggTemporality[K MetricContext]() ottl.StandardGetSetter[K] {
 	return ottl.StandardGetSetter[K]{
-		Getter: func(ctx context.Context, tCtx K) (any, error) {
+		Getter: func(_ context.Context, tCtx K) (any, error) {
 			metric := tCtx.GetMetric()
 			switch metric.Type() {
 			case pmetric.MetricTypeSum:
@@ -134,7 +124,7 @@ func accessAggTemporality[K MetricContext]() ottl.StandardGetSetter[K] {
 			}
 			return nil, nil
 		},
-		Setter: func(ctx context.Context, tCtx K, val any) error {
+		Setter: func(_ context.Context, tCtx K, val any) error {
 			if newAggTemporality, ok := val.(int64); ok {
 				metric := tCtx.GetMetric()
 				switch metric.Type() {
@@ -153,14 +143,14 @@ func accessAggTemporality[K MetricContext]() ottl.StandardGetSetter[K] {
 
 func accessIsMonotonic[K MetricContext]() ottl.StandardGetSetter[K] {
 	return ottl.StandardGetSetter[K]{
-		Getter: func(ctx context.Context, tCtx K) (any, error) {
+		Getter: func(_ context.Context, tCtx K) (any, error) {
 			metric := tCtx.GetMetric()
 			if metric.Type() == pmetric.MetricTypeSum {
 				return metric.Sum().IsMonotonic(), nil
 			}
 			return nil, nil
 		},
-		Setter: func(ctx context.Context, tCtx K, val any) error {
+		Setter: func(_ context.Context, tCtx K, val any) error {
 			if newIsMonotonic, ok := val.(bool); ok {
 				metric := tCtx.GetMetric()
 				if metric.Type() == pmetric.MetricTypeSum {
@@ -174,7 +164,7 @@ func accessIsMonotonic[K MetricContext]() ottl.StandardGetSetter[K] {
 
 func accessDataPoints[K MetricContext]() ottl.StandardGetSetter[K] {
 	return ottl.StandardGetSetter[K]{
-		Getter: func(ctx context.Context, tCtx K) (any, error) {
+		Getter: func(_ context.Context, tCtx K) (any, error) {
 			metric := tCtx.GetMetric()
 			switch metric.Type() {
 			case pmetric.MetricTypeSum:
@@ -190,7 +180,7 @@ func accessDataPoints[K MetricContext]() ottl.StandardGetSetter[K] {
 			}
 			return nil, nil
 		},
-		Setter: func(ctx context.Context, tCtx K, val any) error {
+		Setter: func(_ context.Context, tCtx K, val any) error {
 			metric := tCtx.GetMetric()
 			switch metric.Type() {
 			case pmetric.MetricTypeSum:
