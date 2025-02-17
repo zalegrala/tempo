@@ -30,7 +30,7 @@ require (
 	github.com/hashicorp/go-hclog v1.6.3 // indirect
 	github.com/hashicorp/go-plugin v1.6.0 // indirect
 	github.com/jaegertracing/jaeger v1.57.0
-	github.com/jedib0t/go-pretty/v6 v6.2.4
+	github.com/jedib0t/go-pretty/v6 v6.6.6
 	github.com/json-iterator/go v1.1.12
 	github.com/jsternberg/zap-logfmt v1.2.0
 	github.com/klauspost/compress v1.17.11
@@ -50,7 +50,7 @@ require (
 	github.com/segmentio/fasthash v1.0.3
 	github.com/sony/gobreaker v0.4.1
 	github.com/spf13/viper v1.18.2
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.10.0
 	github.com/uber-go/atomic v1.4.0
 	github.com/uber/jaeger-client-go v2.30.0+incompatible // indirect
 	github.com/willf/bloom v2.0.3+incompatible
@@ -72,7 +72,7 @@ require (
 	go.uber.org/goleak v1.3.0
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/sync v0.9.0
+	golang.org/x/sync v0.11.0
 	golang.org/x/time v0.5.0
 	google.golang.org/api v0.188.0
 	google.golang.org/grpc v1.65.0
@@ -320,8 +320,8 @@ require (
 	golang.org/x/crypto v0.29.0 // indirect
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
 	golang.org/x/mod v0.19.0 // indirect
-	golang.org/x/sys v0.27.0 // indirect
-	golang.org/x/text v0.20.0 // indirect
+	golang.org/x/sys v0.30.0 // indirect
+	golang.org/x/text v0.22.0 // indirect
 	golang.org/x/tools v0.23.0 // indirect
 	gonum.org/v1/gonum v0.15.0 // indirect
 	google.golang.org/genproto v0.0.0-20240708141625-4ad9e859172b // indirect
