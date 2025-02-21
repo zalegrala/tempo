@@ -23,6 +23,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 
+	"github.com/grafana/tempo/modules/backendscheduler"
 	"github.com/grafana/tempo/modules/blockbuilder"
 	"github.com/grafana/tempo/modules/cache"
 	"github.com/grafana/tempo/modules/compactor"
@@ -52,21 +53,23 @@ import (
 // The various modules that make up tempo.
 const (
 	// utilities
-	Server         string = "server"
-	InternalServer string = "internal-server"
-	Store          string = "store"
-	OptionalStore  string = "optional-store"
-	MemberlistKV   string = "memberlist-kv"
-	UsageReport    string = "usage-report"
-	Overrides      string = "overrides"
-	OverridesAPI   string = "overrides-api"
-	CacheProvider  string = "cache-provider"
+	Server           string = "server"
+	InternalServer   string = "internal-server"
+	Store            string = "store"
+	OptionalStore    string = "optional-store"
+	MemberlistKV     string = "memberlist-kv"
+	UsageReport      string = "usage-report"
+	Overrides        string = "overrides"
+	OverridesAPI     string = "overrides-api"
+	CacheProvider    string = "cache-provider"
+	BackendScheduler string = "backend-scheduler"
 
 	// rings
 	IngesterRing          string = "ring"
 	SecondaryIngesterRing string = "secondary-ring"
 	MetricsGeneratorRing  string = "metrics-generator-ring"
 	PartitionRing         string = "partition-ring"
+	// BackendRing           string = "backend-ring"
 
 	// individual targets
 	Distributor      string = "distributor"
@@ -85,6 +88,7 @@ const (
 	ringIngester          string = "ingester"
 	ringMetricsGenerator  string = "metrics-generator"
 	ringSecondaryIngester string = "secondary-ingester"
+	ringBackendScheduler  string = "backend-scheduler"
 )
 
 func (t *App) initServer() (services.Service, error) {
@@ -155,6 +159,10 @@ func (t *App) initIngesterRing() (services.Service, error) {
 
 func (t *App) initGeneratorRing() (services.Service, error) {
 	return t.initReadRing(t.cfg.Generator.Ring.ToRingConfig(), ringMetricsGenerator, t.cfg.Generator.OverrideRingKey)
+}
+
+func (t *App) initBackendRing() (services.Service, error) {
+	return t.initReadRing(t.cfg.BackendScheduler.Ring.ToRingConfig(), ringBackendScheduler, t.cfg.BackendScheduler.OverrideRingKey)
 }
 
 // initSecondaryIngesterRing is an optional ring for the queriers. This secondary ring is useful in edge cases and should
@@ -621,6 +629,22 @@ func (t *App) initCacheProvider() (services.Service, error) {
 	return c, nil
 }
 
+func (t *App) initBackendScheduler() (services.Service, error) {
+	// If not enabled, return idle service
+	if !t.cfg.BackendScheduler.Enabled {
+		return services.NewIdleService(nil, nil), nil
+	}
+
+	// Create the scheduler with config and logger
+	scheduler, err := backendscheduler.New(t.cfg.BackendScheduler, log.Logger, prometheus.DefaultRegisterer)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create backend scheduler: %w", err)
+	}
+
+	t.backendScheduler = scheduler
+	return scheduler, nil
+}
+
 func (t *App) setupModuleManager() error {
 	mm := modules.NewManager(log.Logger)
 
@@ -640,6 +664,7 @@ func (t *App) setupModuleManager() error {
 	mm.RegisterModule(MetricsGeneratorRing, t.initGeneratorRing, modules.UserInvisibleModule)
 	mm.RegisterModule(SecondaryIngesterRing, t.initSecondaryIngesterRing, modules.UserInvisibleModule)
 	mm.RegisterModule(PartitionRing, t.initPartitionRing, modules.UserInvisibleModule)
+	// mm.RegisterModule(BackendRing, t.initBackendRing, modules.UserInvisibleModule)
 
 	mm.RegisterModule(Common, nil, modules.UserInvisibleModule)
 
@@ -650,9 +675,13 @@ func (t *App) setupModuleManager() error {
 	mm.RegisterModule(Compactor, t.initCompactor)
 	mm.RegisterModule(MetricsGenerator, t.initGenerator)
 	mm.RegisterModule(BlockBuilder, t.initBlockBuilder)
+	mm.RegisterModule(BackendScheduler, t.initBackendScheduler)
 
 	mm.RegisterModule(SingleBinary, nil)
 	mm.RegisterModule(ScalableSingleBinary, nil)
+
+	// Register backend scheduler module
+	mm.RegisterModule(BackendScheduler, t.initBackendScheduler)
 
 	deps := map[string][]string{
 		// InternalServer: nil,
@@ -667,6 +696,7 @@ func (t *App) setupModuleManager() error {
 		SecondaryIngesterRing: {Server, MemberlistKV},
 		MetricsGeneratorRing:  {Server, MemberlistKV},
 		PartitionRing:         {MemberlistKV, Server, IngesterRing},
+		// BackendRing:           {Server, MemberlistKV},
 
 		Common: {UsageReport, Server, Overrides},
 
@@ -676,7 +706,7 @@ func (t *App) setupModuleManager() error {
 		Ingester:         {Common, Store, MemberlistKV, PartitionRing},
 		MetricsGenerator: {Common, OptionalStore, MemberlistKV, PartitionRing},
 		Querier:          {Common, Store, IngesterRing, MetricsGeneratorRing, SecondaryIngesterRing},
-		Compactor:        {Common, Store, MemberlistKV},
+		Compactor:        {Common, Store, MemberlistKV, BackendScheduler},
 		BlockBuilder:     {Common, Store, MemberlistKV, PartitionRing},
 
 		// composite targets
