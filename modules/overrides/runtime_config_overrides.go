@@ -554,6 +554,10 @@ func (o *runtimeConfigOverridesManager) DedicatedColumns(userID string) backend.
 	return o.getOverridesForUser(userID).Storage.DedicatedColumns
 }
 
+func (o *runtimeConfigOverridesManager) TraceRedactions(userID string) []string {
+	return o.getOverridesForUser(userID).TraceRedactions
+}
+
 func (o *runtimeConfigOverridesManager) getOverridesForUser(userID string) *Overrides {
 	if tenantOverrides := o.tenantOverrides(); tenantOverrides != nil {
 		l := tenantOverrides.forUser(userID)

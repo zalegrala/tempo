@@ -166,6 +166,22 @@ func (q *Work) HasBlocks(ids []string) bool {
 	return false
 }
 
+// HasTracesa returns true if any job is currently working on any of the provided trace IDs.
+func (q *Work) HasTraces(ids []string) bool {
+	q.mtx.RLock()
+	defer q.mtx.RUnlock()
+
+	for _, j := range q.Jobs {
+		for _, id := range ids {
+			if j.OnTraceID(id) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 func (q *Work) Marshal() ([]byte, error) {
 	q.mtx.RLock()
 	defer q.mtx.RUnlock()

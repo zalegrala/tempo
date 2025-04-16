@@ -333,9 +333,12 @@ func (s *BackendScheduler) UpdateJob(ctx context.Context, req *tempopb.UpdateJob
 
 func (s *BackendScheduler) StatusHandler(w http.ResponseWriter, _ *http.Request) {
 	x := table.NewWriter()
-	x.AppendHeader(table.Row{"tenant", "jobID", "type", "input", "output", "status", "worker", "created", "start", "end"})
+	x.AppendHeader(table.Row{"tenant", "jobID", "type", "compaction/input", "compaction/output", "status", "worker", "created", "start", "end"})
 
 	for _, j := range s.work.ListJobs() {
+		if j.GetType() == tempopb.JobType_JOB_TYPE_REDACTION {
+			continue
+		}
 		x.AppendRows([]table.Row{
 			{
 				j.Tenant(),
@@ -353,6 +356,28 @@ func (s *BackendScheduler) StatusHandler(w http.ResponseWriter, _ *http.Request)
 	}
 
 	x.AppendSeparator()
+
+	x.AppendHeader(table.Row{"tenant", "jobID", "type", "redaction/traceIDs", "redaction/blocks", "status", "worker", "created", "start", "end"})
+	for _, j := range s.work.ListJobs() {
+		if j.GetType() != tempopb.JobType_JOB_TYPE_REDACTION {
+			continue
+		}
+
+		x.AppendRows([]table.Row{
+			{
+				j.Tenant(),
+				j.GetID(),
+				j.GetType().String(),
+				j.GetRedactionBlocks(),
+				j.GetRedactionTraceIDs(),
+				j.GetStatus().String(),
+				j.GetWorkerID(),
+				j.GetCreatedTime(),
+				j.GetStartTime(),
+				j.GetEndTime(),
+			},
+		})
+	}
 
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, x.Render())

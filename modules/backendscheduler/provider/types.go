@@ -16,4 +16,5 @@ type Provider interface {
 type Scheduler interface {
 	ListJobs() []*work.Job
 	HasBlocks([]string) bool
+	HasTraces([]string) bool
 }

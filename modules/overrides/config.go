@@ -207,6 +207,7 @@ type Overrides struct {
 	// Storage enforced overrides.
 	Storage         StorageOverrides         `yaml:"storage,omitempty" json:"storage,omitempty"`
 	CostAttribution CostAttributionOverrides `yaml:"cost_attribution,omitempty" json:"cost_attribution,omitempty"`
+	TraceRedactions []string                 `yaml:"trace_redactions,omitempty" json:"trace_redactions,omitempty"`
 }
 
 type Config struct {

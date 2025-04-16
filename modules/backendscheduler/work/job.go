@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/grafana/tempo/pkg/tempopb"
+	"github.com/grafana/tempo/pkg/util"
 )
 
 type Job struct {
@@ -124,7 +125,26 @@ func (j *Job) OnBlock(id string) bool {
 		}
 	}
 
+	// TODO: is this required?  Perhaps we only need to skip the inputs.  A
+	// redaction job will possibly use the output of a compaction job.
 	for _, b := range j.GetCompactionOutput() {
+		if b == id {
+			return true
+		}
+	}
+
+	for _, b := range j.GetRedactionBlocks() {
+		if b == id {
+			return true
+		}
+	}
+
+	return false
+}
+
+// OnTrace returns true if the job is operating on a TraceID.
+func (j *Job) OnTraceID(id string) bool {
+	for _, b := range j.GetRedactionTraceIDs() {
 		if b == id {
 			return true
 		}
@@ -173,5 +193,39 @@ func (j *Job) SetCompactionOutput(blocks []string) {
 		j.JobDetail.Compaction.Output = blocks
 	default:
 		return
+	}
+}
+
+func (j *Job) GetRedactionTraceIDs() []string {
+	j.mtx.RLock()
+	defer j.mtx.RUnlock()
+
+	switch j.Type {
+	case tempopb.JobType_JOB_TYPE_REDACTION:
+		if len(j.JobDetail.Redaction.TraceIDs) == 0 {
+			return nil
+		}
+
+		ids := make([]string, len(j.JobDetail.Redaction.TraceIDs))
+
+		for i, id := range j.JobDetail.Redaction.TraceIDs {
+			ids[i] = util.TraceIDToHexString(id)
+		}
+
+		return ids
+	default:
+		return nil
+	}
+}
+
+func (j *Job) GetRedactionBlocks() []string {
+	j.mtx.RLock()
+	defer j.mtx.RUnlock()
+
+	switch j.Type {
+	case tempopb.JobType_JOB_TYPE_REDACTION:
+		return j.JobDetail.Redaction.Blocks
+	default:
+		return nil
 	}
 }
