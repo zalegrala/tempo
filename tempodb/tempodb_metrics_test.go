@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/go-kit/log"
 	"github.com/google/go-cmp/cmp"
 	"github.com/grafana/tempo/pkg/model"
@@ -28,10 +29,11 @@ import (
 
 func requestWithDefaultRange(q string) *tempopb.QueryRangeRequest {
 	return &tempopb.QueryRangeRequest{
-		Start: 1,
-		End:   50 * uint64(time.Second),
-		Step:  15 * uint64(time.Second),
-		Query: q,
+		Start:     1,
+		End:       50 * uint64(time.Second),
+		Step:      15 * uint64(time.Second),
+		Query:     q,
+		Exemplars: 100,
 	}
 }
 
@@ -116,6 +118,68 @@ var queryRangeTestCases = []struct {
 			{
 				PromLabels: `{__name__="rate"}`,
 				Labels:     []common_v1.KeyValue{tempopb.MakeKeyValueString("__name__", "rate")},
+				Samples: []tempopb.Sample{
+					{TimestampMs: 0, Value: 0},
+					{TimestampMs: 15_000, Value: 0},
+					{TimestampMs: 30_000, Value: 0},
+					{TimestampMs: 45_000, Value: 0},
+					{TimestampMs: 60_000, Value: 0},
+				},
+			},
+		},
+	},
+	{
+		name: "rate_by_structural",
+		req:  requestWithDefaultRange(`{ .service.name!="" } > {} | rate()`),
+		expectedL1: []*tempopb.TimeSeries{
+			{
+				PromLabels: `{__name__="rate"}`,
+				Labels:     []common_v1.KeyValue{tempopb.MakeKeyValueString("__name__", "rate")},
+				Samples: []tempopb.Sample{
+					{TimestampMs: 0, Value: 0},      // First interval starts at 1, so it only has 14 spans
+					{TimestampMs: 15_000, Value: 0}, // Spans every 1 second
+					{TimestampMs: 30_000, Value: 0}, // Spans every 1 second
+					{TimestampMs: 45_000, Value: 0}, // Interval [45,50) has 5 spans
+					{TimestampMs: 60_000, Value: 0}, // I think this is a bug that we extend out an extra interval
+				},
+			},
+		},
+		expectedL2: []*tempopb.TimeSeries{
+			{
+				PromLabels: `{__name__="rate"}`,
+				Labels:     []common_v1.KeyValue{tempopb.MakeKeyValueString("__name__", "rate")},
+				// with two sources rate will be doubled
+				Samples: []tempopb.Sample{
+					{TimestampMs: 0, Value: 0},
+					{TimestampMs: 15_000, Value: 0},
+					{TimestampMs: 30_000, Value: 0},
+					{TimestampMs: 45_000, Value: 0},
+					{TimestampMs: 60_000, Value: 0},
+				},
+			},
+		},
+	},
+	{
+		name: "rate_by_structural_by",
+		req:  requestWithDefaultRange(`{ .service.name!="" } > {} | rate() by (resource.service.name)`),
+		expectedL1: []*tempopb.TimeSeries{
+			{
+				PromLabels: `{__name__="rate"}`,
+				Labels:     []common_v1.KeyValue{tempopb.MakeKeyValueString("__name__", "rate")},
+				Samples: []tempopb.Sample{
+					{TimestampMs: 0, Value: 0},      // First interval starts at 1, so it only has 14 spans
+					{TimestampMs: 15_000, Value: 0}, // Spans every 1 second
+					{TimestampMs: 30_000, Value: 0}, // Spans every 1 second
+					{TimestampMs: 45_000, Value: 0}, // Interval [45,50) has 5 spans
+					{TimestampMs: 60_000, Value: 0}, // I think this is a bug that we extend out an extra interval
+				},
+			},
+		},
+		expectedL2: []*tempopb.TimeSeries{
+			{
+				PromLabels: `{__name__="rate"}`,
+				Labels:     []common_v1.KeyValue{tempopb.MakeKeyValueString("__name__", "rate")},
+				// with two sources rate will be doubled
 				Samples: []tempopb.Sample{
 					{TimestampMs: 0, Value: 0},
 					{TimestampMs: 15_000, Value: 0},
@@ -905,6 +969,7 @@ func TestTempoDBQueryRange(t *testing.T) {
 	dec := model.MustNewSegmentDecoder(model.CurrentEncoding)
 
 	totalSpans := 100
+	var evenParent []byte
 	for i := 1; i <= totalSpans; i++ {
 		tid := test.ValidTraceID(nil)
 
@@ -919,9 +984,17 @@ func TestTempoDBQueryRange(t *testing.T) {
 		// Service name
 		var svcName string
 		if i%2 == 0 {
+			evenParent = sp.SpanId
 			svcName = "even"
 		} else {
 			svcName = "odd"
+		}
+
+		if i%9 == 0 {
+			// Every 9th span has an even parent if it is odd
+			if evenParent != nil && svcName == "odd" {
+				sp.ParentSpanId = evenParent
+			}
 		}
 
 		tr := &tempopb.Trace{
@@ -961,12 +1034,14 @@ func TestTempoDBQueryRange(t *testing.T) {
 	for _, tc := range queryRangeTestCases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := traceql.NewEngine()
-			eval, err := e.CompileMetricsQueryRange(tc.req, 0, 0, false)
+			eval, err := e.CompileMetricsQueryRange(tc.req, 100, 0, false)
 			require.NoError(t, err)
 
 			err = eval.Do(ctx, f, 0, 0, 0)
 			require.NoError(t, err)
 
+			results := eval.Results()
+			spew.Dump("results", results)
 			actual := eval.Results().ToProto(tc.req)
 			expected := tc.expectedL1
 
