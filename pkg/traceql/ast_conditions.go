@@ -2,6 +2,7 @@ package traceql
 
 func (r RootExpr) extractConditions(request *FetchSpansRequest) {
 	r.Pipeline.extractConditions(request)
+
 	if r.MetricsPipeline != nil {
 		r.MetricsPipeline.extractConditions(request)
 	}

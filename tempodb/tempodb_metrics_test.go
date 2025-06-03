@@ -127,6 +127,37 @@ var queryRangeTestCases = []struct {
 		},
 	},
 	{
+		name: "rate_structural_by",
+		req:  requestWithDefaultRange(`{ .service.name="even" } > {} | rate() by (name)`),
+		expectedL1: []*tempopb.TimeSeries{
+			{
+				PromLabels: `{__name__="rate"}`,
+				Labels:     []common_v1.KeyValue{tempopb.MakeKeyValueString("__name__", "rate")},
+				Samples: []tempopb.Sample{
+					{TimestampMs: 0, Value: 2 * 7.0 / 15.0},
+					{TimestampMs: 15_000, Value: 2 * 7.0 / 15.0},
+					{TimestampMs: 30_000, Value: 2 * 8.0 / 15.0},
+					{TimestampMs: 45_000, Value: 2 * 2.0 / 15.0},
+					{TimestampMs: 60_000, Value: 0},
+				},
+			},
+		},
+		expectedL2: []*tempopb.TimeSeries{
+			{
+				PromLabels: `{__name__="rate"}`,
+				Labels:     []common_v1.KeyValue{tempopb.MakeKeyValueString("__name__", "rate")},
+				// with two sources rate will be doubled
+				Samples: []tempopb.Sample{
+					{TimestampMs: 0, Value: 0},
+					{TimestampMs: 15_000, Value: 0},
+					{TimestampMs: 30_000, Value: 0},
+					{TimestampMs: 45_000, Value: 0},
+					{TimestampMs: 60_000, Value: 0},
+				},
+			},
+		},
+	},
+	{
 		name: "count_over_time",
 		req:  requestWithDefaultRange(`{ } | count_over_time()`),
 		expectedL1: []*tempopb.TimeSeries{
@@ -905,6 +936,7 @@ func TestTempoDBQueryRange(t *testing.T) {
 	dec := model.MustNewSegmentDecoder(model.CurrentEncoding)
 
 	totalSpans := 100
+	var evenParent []byte
 	for i := 1; i <= totalSpans; i++ {
 		tid := test.ValidTraceID(nil)
 
@@ -919,9 +951,17 @@ func TestTempoDBQueryRange(t *testing.T) {
 		// Service name
 		var svcName string
 		if i%2 == 0 {
+			evenParent = sp.SpanId
 			svcName = "even"
 		} else {
 			svcName = "odd"
+		}
+
+		if i%9 == 0 {
+			// Every 9th span has an even parent if it is odd
+			if evenParent != nil && svcName == "odd" {
+				sp.ParentSpanId = evenParent
+			}
 		}
 
 		tr := &tempopb.Trace{

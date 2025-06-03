@@ -202,10 +202,10 @@ func (ls Labels) String() string {
 	promLabels := labels.NewBuilder(nil)
 	for _, l := range ls {
 		var promValue string
-		switch {
-		case l.Value.Type == TypeNil:
+		switch l.Value.Type {
+		case TypeNil:
 			promValue = "<nil>"
-		case l.Value.Type == TypeString:
+		case TypeString:
 			s := l.Value.EncodeToString(false)
 			if s == "nil" {
 				promValue = "<nil>"
