@@ -1376,9 +1376,10 @@ func (h *Histogram) Record(bucket float64, count int) {
 }
 
 type histSeries struct {
-	labels    Labels
-	hist      []Histogram
-	exemplars []Exemplar
+	labels          Labels
+	hist            []Histogram
+	exemplars       []Exemplar
+	exemplarBuckets *bucketSet
 }
 
 type HistogramAggregator struct {
@@ -1387,6 +1388,7 @@ type HistogramAggregator struct {
 	len              int
 	start, end, step uint64
 	exemplarBuckets  *bucketSet
+	exemplarLimit    uint32
 }
 
 func NewHistogramAggregator(req *tempopb.QueryRangeRequest, qs []float64, exemplars uint32) *HistogramAggregator {
@@ -1403,12 +1405,11 @@ func NewHistogramAggregator(req *tempopb.QueryRangeRequest, qs []float64, exempl
 			alignStart(req.Start, req.Step),
 			alignEnd(req.End, req.Step),
 		),
+		exemplarLimit: exemplars,
 	}
 }
 
 func (h *HistogramAggregator) Combine(in []*tempopb.TimeSeries) {
-	// var min, max time.Time
-
 	for _, ts := range in {
 		// Convert proto labels to traceql labels
 		// while at the same time stripping the bucket label
@@ -1437,6 +1438,11 @@ func (h *HistogramAggregator) Combine(in []*tempopb.TimeSeries) {
 			existing = histSeries{
 				labels: withoutBucket,
 				hist:   make([]Histogram, h.len),
+				exemplarBuckets: newBucketSet(
+					h.exemplarLimit,
+					h.start,
+					h.end,
+				),
 			}
 		}
 
@@ -1452,14 +1458,14 @@ func (h *HistogramAggregator) Combine(in []*tempopb.TimeSeries) {
 			}
 		}
 
+		// Collect exemplars per series, not globally
 		for _, exemplar := range ts.Exemplars {
-			if h.exemplarBuckets.testTotal() {
-				break
+			if existing.exemplarBuckets.testTotal() {
+				continue
 			}
-			if h.exemplarBuckets.addAndTest(uint64(exemplar.TimestampMs)) { //nolint: gosec // G115
+			if existing.exemplarBuckets.addAndTest(uint64(exemplar.TimestampMs)) {
 				continue // Skip this exemplar and continue, next exemplar might fit in a different bucket
 			}
-
 			labels := make(Labels, 0, len(exemplar.Labels))
 			for _, l := range exemplar.Labels {
 				labels = append(labels, Label{
@@ -1482,30 +1488,64 @@ func (h *HistogramAggregator) Results() SeriesSet {
 
 	for _, in := range h.ss {
 		// For each input series, we create a new series for each quantile.
-		for _, q := range h.qs {
+		for qIdx, q := range h.qs {
 			// Append label for the quantile
 			labels := append((Labels)(nil), in.labels...)
 			labels = append(labels, Label{"p", NewStaticFloat(q)})
 			s := labels.String()
 
 			ts := TimeSeries{
-				Labels:    labels,
-				Values:    make([]float64, len(in.hist)),
-				Exemplars: in.exemplars,
+				Labels: labels,
+				Values: make([]float64, len(in.hist)),
 			}
-			for i := range in.hist {
 
+			// Track which buckets are used for this quantile across time intervals
+			quantileBuckets := make([]float64, len(in.hist))
+
+			for i := range in.hist {
 				buckets := in.hist[i].Buckets
 				sort.Slice(buckets, func(i, j int) bool {
 					return buckets[i].Max < buckets[j].Max
 				})
 
-				ts.Values[i] = Log2Quantile(q, buckets)
+				if len(buckets) == 0 {
+					quantileBuckets[i] = math.NaN()
+					continue
+				}
+
+				quantileValue, bucketMax := Log2QuantileWithBucket(q, buckets)
+				ts.Values[i] = quantileValue
+				quantileBuckets[i] = bucketMax
 			}
+
+			// Simple exemplar distribution - just divide exemplars evenly across quantiles
+			if len(in.exemplars) > 0 {
+				ts.Exemplars = h.selectExemplarsFromQuantileBuckets(in.exemplars, quantileBuckets, qIdx)
+			}
+
 			results[s] = ts
 		}
 	}
 	return results
+}
+
+// selectExemplarsFromQuantileBuckets selects exemplars for this quantile series.
+// Conservative approach: just distribute available exemplars evenly across quantiles.
+func (h *HistogramAggregator) selectExemplarsFromQuantileBuckets(allExemplars []Exemplar, quantileBuckets []float64, quantileIdx int) []Exemplar {
+	if len(allExemplars) == 0 {
+		return nil
+	}
+
+	// Simple round-robin distribution across quantiles
+	totalQuantiles := len(h.qs)
+	var result []Exemplar
+
+	// Start from this quantile's offset and take every Nth exemplar
+	for i := quantileIdx; i < len(allExemplars); i += totalQuantiles {
+		result = append(result, allExemplars[i])
+	}
+
+	return result
 }
 
 func (h *HistogramAggregator) Length() int {
@@ -1524,11 +1564,18 @@ func Log2Bucketize(v uint64) float64 {
 // Log2Quantile returns the quantile given bucket labeled with float ranges and counts. Uses
 // exponential power-of-two interpolation between buckets as needed.
 func Log2Quantile(p float64, buckets []HistogramBucket) float64 {
+	value, _ := Log2QuantileWithBucket(p, buckets)
+	return value
+}
+
+// Log2QuantileWithBucket returns both the quantile value and the bucket information
+// where the quantile was found. This is useful for selecting appropriate exemplars.
+func Log2QuantileWithBucket(p float64, buckets []HistogramBucket) (float64, float64) {
 	if math.IsNaN(p) ||
 		p < 0 ||
 		p > 1 ||
 		len(buckets) == 0 {
-		return 0
+		return 0, 0
 	}
 
 	totalCount := 0
@@ -1537,7 +1584,7 @@ func Log2Quantile(p float64, buckets []HistogramBucket) float64 {
 	}
 
 	if totalCount == 0 {
-		return 0
+		return 0, 0
 	}
 
 	// Maximum amount of samples to include. We round up to better handle
@@ -1568,7 +1615,7 @@ func Log2Quantile(p float64, buckets []HistogramBucket) float64 {
 		// Quantile is the max range for the bucket. No reason
 		// to enter interpolation below.
 		if total == maxSamples {
-			return b.Max
+			return b.Max, b.Max
 		}
 	}
 
@@ -1588,7 +1635,9 @@ func Log2Quantile(p float64, buckets []HistogramBucket) float64 {
 		min = max - 1
 	}
 	mid := math.Pow(2, min+(max-min)*interp)
-	return mid
+
+	// Return both the calculated quantile value and the bucket max it came from
+	return mid, buckets[bucket].Max
 }
 
 var (

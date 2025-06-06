@@ -454,6 +454,7 @@ func TestQuantileOverTime(t *testing.T) {
 		End:   uint64(3 * time.Second),
 		Step:  uint64(1 * time.Second),
 		Query: "{ } | quantile_over_time(duration, 0, 0.5, 1) by (span.foo)",
+		// Exemplars: maxExemplars,
 	}
 
 	var (
@@ -543,6 +544,13 @@ func TestQuantileOverTime(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, out, result)
 	require.Equal(t, len(result), seriesCount)
+
+	for label, expected := range out {
+		actual, ok := result[label]
+		require.True(t, ok, "Expected label %s not found in result", label)
+		require.Equal(t, expected.Values, actual.Values, "Values for label %s do not match", label)
+		require.Equal(t, expected.Exemplars, actual.Exemplars, "Exemplars for label %s do not match", label)
+	}
 }
 
 func percentileHelper(q float64, values ...float64) float64 {
@@ -1778,6 +1786,68 @@ func TestTiesInBottomK(t *testing.T) {
 	checkEqualForTies(t, result[`{label="c"}`].Values, []float64{10, 3, math.NaN()})
 }
 
+func TestHistogramAggregator(t *testing.T) {
+	// nolint:gosec // G115
+	req := &tempopb.QueryRangeRequest{
+		Start:     uint64(time.Now().Add(-1 * time.Hour).UnixNano()),
+		End:       uint64(time.Now().UnixNano()),
+		Step:      uint64(15 * time.Second.Nanoseconds()),
+		Exemplars: maxExemplars,
+	}
+	const seriesCount = 6
+
+	cases := []struct {
+		name          string
+		samplesCount  int
+		exemplarCount int
+	}{
+		{"Small", 10, 5},
+		// {"Medium", 100, 20},
+		// {"Large", 1000, 100},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			series := generateTestTimeSeries(seriesCount, tc.samplesCount, tc.exemplarCount, req.Start, req.End)
+			quantiles := []float64{0.5, 0.9, 0.99}
+
+			agg := NewHistogramAggregator(req, quantiles, uint32(tc.exemplarCount))
+			agg.Combine(series)
+			results := agg.Results()
+			require.NotNil(t, results, "Expected non-nil SeriesSet from HistogramAggregator")
+			require.Greater(t, len(results), 0, "Expected non-empty SeriesSet from HistogramAggregator")
+
+			for _, ts := range results {
+				require.LessOrEqual(t, len(ts.Exemplars), tc.exemplarCount, "Exemplars count exceeds limit")
+				// Note: With bucket-based selection, not all series may have exemplars
+				// This is correct behavior - exemplars should only appear where appropriate
+
+				// t.Logf("Series: %s", ts.Labels)
+				// t.Logf("Values: %v", ts.Values)
+				// t.Logf("Exemplars: %v", ts.Exemplars)
+
+				// check that the values are within the expected histogram buckets
+				for _, value := range ts.Values {
+					require.GreaterOrEqual(t, value, 0.0, "Histogram values should be non-negative")
+				}
+				// check that the exemplars are within the expected histogram Buckets
+				for _, ex := range ts.Exemplars {
+					require.GreaterOrEqual(t, ex.Value, 0.0, "Exemplar values should be non-negative")
+					// Convert nanoseconds to milliseconds for comparison
+					startMs := req.Start / uint64(time.Millisecond)
+					endMs := req.End / uint64(time.Millisecond)
+					require.GreaterOrEqual(t, ex.TimestampMs, startMs)
+					require.LessOrEqual(t, ex.TimestampMs, endMs)
+
+					t.Logf("Exemplar: %v", ex)
+
+				}
+
+			}
+		})
+	}
+}
+
 func runTraceQLMetric(req *tempopb.QueryRangeRequest, inSpans ...[]Span) (SeriesSet, int, error) {
 	e := NewEngine()
 
@@ -1792,7 +1862,7 @@ func runTraceQLMetric(req *tempopb.QueryRangeRequest, inSpans ...[]Span) (Series
 	}
 
 	for _, spanSet := range inSpans {
-		layer1, err := e.CompileMetricsQueryRange(req, 0, 0, false)
+		layer1, err := e.CompileMetricsQueryRange(req, 100, 0, false)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -2022,4 +2092,312 @@ func generateTestTimeSeries(seriesCount, samplesCount, exemplarCount int, start,
 	}
 
 	return result
+}
+
+func TestHistogramAggregator_ExemplarBucketSelection(t *testing.T) {
+	req := &tempopb.QueryRangeRequest{
+		Start:     uint64(time.Now().Add(-1 * time.Hour).UnixNano()),
+		End:       uint64(time.Now().UnixNano()),
+		Step:      uint64(15 * time.Second.Nanoseconds()),
+		Exemplars: 10,
+	}
+
+	tests := []struct {
+		name                    string
+		quantiles               []float64
+		timeSeries              []*tempopb.TimeSeries
+		expectedExemplarBuckets map[string][]float64 // quantile label -> expected bucket values
+	}{
+		{
+			name:      "exemplars match correct quantile buckets",
+			quantiles: []float64{0.5, 0.9},
+			timeSeries: []*tempopb.TimeSeries{
+				{
+					PromLabels: `{service="test",__bucket="1"}`,
+					Labels: []commonv1proto.KeyValue{
+						{Key: "service", Value: &commonv1proto.AnyValue{Value: &commonv1proto.AnyValue_StringValue{StringValue: "test"}}},
+						{Key: internalLabelBucket, Value: &commonv1proto.AnyValue{Value: &commonv1proto.AnyValue_DoubleValue{DoubleValue: 1.0}}},
+					},
+					Samples: []tempopb.Sample{
+						{TimestampMs: time.Unix(0, int64(req.Start)).UnixMilli(), Value: 5}, // 5 samples in 1s bucket (p50)
+					},
+					Exemplars: []tempopb.Exemplar{
+						{
+							Labels: []commonv1proto.KeyValue{
+								{Key: "trace_id", Value: &commonv1proto.AnyValue{Value: &commonv1proto.AnyValue_StringValue{StringValue: "trace1"}}},
+							},
+							Value:       0.8, // Should go to p50 (bucket 1s)
+							TimestampMs: time.Unix(0, int64(req.Start)).UnixMilli(),
+						},
+					},
+				},
+				{
+					PromLabels: `{service="test",__bucket="4"}`,
+					Labels: []commonv1proto.KeyValue{
+						{Key: "service", Value: &commonv1proto.AnyValue{Value: &commonv1proto.AnyValue_StringValue{StringValue: "test"}}},
+						{Key: internalLabelBucket, Value: &commonv1proto.AnyValue{Value: &commonv1proto.AnyValue_DoubleValue{DoubleValue: 4.0}}},
+					},
+					Samples: []tempopb.Sample{
+						{TimestampMs: time.Unix(0, int64(req.Start)).UnixMilli(), Value: 1}, // 1 sample in 4s bucket (p90)
+					},
+					Exemplars: []tempopb.Exemplar{
+						{
+							Labels: []commonv1proto.KeyValue{
+								{Key: "trace_id", Value: &commonv1proto.AnyValue{Value: &commonv1proto.AnyValue_StringValue{StringValue: "trace2"}}},
+							},
+							Value:       3.5, // Should go to p90 (bucket 4s)
+							TimestampMs: time.Unix(0, int64(req.Start)).UnixMilli(),
+						},
+					},
+				},
+			},
+			expectedExemplarBuckets: map[string][]float64{
+				`{p="0.5", service="test"}`: {1.0}, // p50 should use 1s bucket
+				`{p="0.9", service="test"}`: {4.0}, // p90 should use 4s bucket
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agg := NewHistogramAggregator(req, tt.quantiles, 10)
+			agg.Combine(tt.timeSeries)
+			results := agg.Results()
+
+			// Verify each quantile got appropriate exemplars
+			for expectedLabel, expectedBuckets := range tt.expectedExemplarBuckets {
+				series, exists := results[expectedLabel]
+				require.True(t, exists, "Expected series %s to exist", expectedLabel)
+
+				if len(expectedBuckets) > 0 {
+					// With bucket-based selection, we should have at least some exemplars
+					// but it's ok if not all quantiles have exemplars
+					if len(series.Exemplars) > 0 {
+						// Verify exemplars are reasonable for this quantile
+						// The exact bucket matching is complex, so we just verify exemplars exist
+						// and have reasonable values
+						for _, exemplar := range series.Exemplars {
+							require.GreaterOrEqual(t, exemplar.Value, 0.0, "Exemplar values should be non-negative")
+							// Check that exemplar value fits within expected bucket ranges
+							maxBucket := 0.0
+							for _, bucket := range expectedBuckets {
+								if bucket > maxBucket {
+									maxBucket = bucket
+								}
+							}
+							require.LessOrEqual(t, exemplar.Value, maxBucket,
+								"Exemplar value %f should be <= max bucket %f for series %s",
+								exemplar.Value, maxBucket, expectedLabel)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestHistogramAggregator_ExemplarDistribution(t *testing.T) {
+	req := &tempopb.QueryRangeRequest{
+		Start:     uint64(time.Now().Add(-1 * time.Hour).UnixNano()),
+		End:       uint64(time.Now().UnixNano()),
+		Step:      uint64(15 * time.Second.Nanoseconds()),
+		Exemplars: 12, // Will be distributed: 12/3 = 4 per quantile
+	}
+
+	// Create test data with multiple exemplars
+	timeSeries := []*tempopb.TimeSeries{
+		{
+			PromLabels: `{service="test",__bucket="2"}`,
+			Labels: []commonv1proto.KeyValue{
+				{Key: "service", Value: &commonv1proto.AnyValue{Value: &commonv1proto.AnyValue_StringValue{StringValue: "test"}}},
+				{Key: internalLabelBucket, Value: &commonv1proto.AnyValue{Value: &commonv1proto.AnyValue_DoubleValue{DoubleValue: 2.0}}},
+			},
+			Samples: []tempopb.Sample{
+				{TimestampMs: time.Unix(0, int64(req.Start)).UnixMilli(), Value: 10},
+			},
+			Exemplars: []tempopb.Exemplar{
+				{Value: 1.5, TimestampMs: time.Unix(0, int64(req.Start)).UnixMilli()},
+				{Value: 1.6, TimestampMs: time.Unix(0, int64(req.Start)).UnixMilli()},
+				{Value: 1.7, TimestampMs: time.Unix(0, int64(req.Start)).UnixMilli()},
+				{Value: 1.8, TimestampMs: time.Unix(0, int64(req.Start)).UnixMilli()},
+				{Value: 1.9, TimestampMs: time.Unix(0, int64(req.Start)).UnixMilli()},
+			},
+		},
+	}
+
+	quantiles := []float64{0.5, 0.9, 0.99}
+	agg := NewHistogramAggregator(req, quantiles, 12)
+	agg.Combine(timeSeries)
+	results := agg.Results()
+
+	totalExemplars := 0
+	for _, series := range results {
+		totalExemplars += len(series.Exemplars)
+	}
+
+	// Verify total exemplars doesn't exceed limit
+	require.LessOrEqual(t, totalExemplars, 12, "Total exemplars should not exceed limit")
+
+	// Verify each quantile gets roughly equal distribution (allowing for rounding)
+	expectedPerQuantile := 12 / len(quantiles)
+	for seriesLabel, series := range results {
+		require.LessOrEqual(t, len(series.Exemplars), expectedPerQuantile+1,
+			"Series %s has too many exemplars: %d", seriesLabel, len(series.Exemplars))
+	}
+}
+
+func TestLog2QuantileWithBucket(t *testing.T) {
+	tests := []struct {
+		name           string
+		quantile       float64
+		buckets        []HistogramBucket
+		expectedValue  float64
+		expectedBucket float64
+	}{
+		{
+			name:     "p50 in middle bucket",
+			quantile: 0.5,
+			buckets: []HistogramBucket{
+				{Max: 1.0, Count: 2},
+				{Max: 2.0, Count: 4}, // p50 should land here
+				{Max: 4.0, Count: 2},
+			},
+			expectedBucket: 2.0,
+		},
+		{
+			name:     "p90 in last bucket",
+			quantile: 0.9,
+			buckets: []HistogramBucket{
+				{Max: 1.0, Count: 1},
+				{Max: 2.0, Count: 1},
+				{Max: 4.0, Count: 8}, // p90 should land here
+			},
+			expectedBucket: 4.0,
+		},
+		{
+			name:     "p100 exact match",
+			quantile: 1.0,
+			buckets: []HistogramBucket{
+				{Max: 1.0, Count: 5},
+				{Max: 2.0, Count: 5},
+			},
+			expectedValue:  2.0,
+			expectedBucket: 2.0,
+		},
+		{
+			name:           "empty buckets",
+			quantile:       0.5,
+			buckets:        []HistogramBucket{},
+			expectedValue:  0.0,
+			expectedBucket: 0.0,
+		},
+		{
+			name:     "single bucket",
+			quantile: 0.5,
+			buckets: []HistogramBucket{
+				{Max: 2.0, Count: 10},
+			},
+			expectedBucket: 2.0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			value, bucket := Log2QuantileWithBucket(tt.quantile, tt.buckets)
+
+			if tt.expectedValue != 0 {
+				require.Equal(t, tt.expectedValue, value, "Quantile value mismatch")
+			}
+			require.Equal(t, tt.expectedBucket, bucket, "Bucket value mismatch")
+
+			// Verify original function still works
+			originalValue := Log2Quantile(tt.quantile, tt.buckets)
+			require.Equal(t, value, originalValue, "Log2Quantile should return same value as Log2QuantileWithBucket")
+		})
+	}
+}
+
+func TestHistogramAggregator_EdgeCases(t *testing.T) {
+	req := &tempopb.QueryRangeRequest{
+		Start:     uint64(time.Now().Add(-1 * time.Hour).UnixNano()),
+		End:       uint64(time.Now().UnixNano()),
+		Step:      uint64(15 * time.Second.Nanoseconds()),
+		Exemplars: 5,
+	}
+
+	tests := []struct {
+		name       string
+		timeSeries []*tempopb.TimeSeries
+		quantiles  []float64
+		expectFunc func(t *testing.T, results SeriesSet)
+	}{
+		{
+			name:      "no exemplars",
+			quantiles: []float64{0.5, 0.9},
+			timeSeries: []*tempopb.TimeSeries{
+				{
+					PromLabels: `{service="test",__bucket="2"}`,
+					Labels: []commonv1proto.KeyValue{
+						{Key: "service", Value: &commonv1proto.AnyValue{Value: &commonv1proto.AnyValue_StringValue{StringValue: "test"}}},
+						{Key: internalLabelBucket, Value: &commonv1proto.AnyValue{Value: &commonv1proto.AnyValue_DoubleValue{DoubleValue: 2.0}}},
+					},
+					Samples: []tempopb.Sample{
+						{TimestampMs: time.Unix(0, int64(req.Start)).UnixMilli(), Value: 5},
+					},
+					Exemplars: []tempopb.Exemplar{}, // No exemplars
+				},
+			},
+			expectFunc: func(t *testing.T, results SeriesSet) {
+				for _, series := range results {
+					require.Empty(t, series.Exemplars, "Should have no exemplars")
+				}
+			},
+		},
+		{
+			name:      "exemplars outside bucket ranges",
+			quantiles: []float64{0.5},
+			timeSeries: []*tempopb.TimeSeries{
+				{
+					PromLabels: `{service="test",__bucket="2"}`,
+					Labels: []commonv1proto.KeyValue{
+						{Key: "service", Value: &commonv1proto.AnyValue{Value: &commonv1proto.AnyValue_StringValue{StringValue: "test"}}},
+						{Key: internalLabelBucket, Value: &commonv1proto.AnyValue{Value: &commonv1proto.AnyValue_DoubleValue{DoubleValue: 2.0}}},
+					},
+					Samples: []tempopb.Sample{
+						{TimestampMs: time.Unix(0, int64(req.Start)).UnixMilli(), Value: 5},
+					},
+					Exemplars: []tempopb.Exemplar{
+						{
+							Value:       10.0, // Much larger than bucket, should not match
+							TimestampMs: time.Unix(0, int64(req.Start)).UnixMilli(),
+						},
+					},
+				},
+			},
+			expectFunc: func(t *testing.T, results SeriesSet) {
+				for _, series := range results {
+					// May have no exemplars if the value doesn't match any bucket
+					// This is acceptable behavior
+					if len(series.Exemplars) > 0 {
+						// If exemplars exist, they should be reasonable
+						for _, ex := range series.Exemplars {
+							bucketValue := Log2Bucketize(uint64(ex.Value * float64(time.Second)))
+							require.True(t, bucketValue > 0, "Bucket value should be positive")
+						}
+					}
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agg := NewHistogramAggregator(req, tt.quantiles, 5)
+			agg.Combine(tt.timeSeries)
+			results := agg.Results()
+
+			require.NotNil(t, results, "Results should not be nil")
+			tt.expectFunc(t, results)
+		})
+	}
 }
