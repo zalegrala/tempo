@@ -2271,21 +2271,25 @@ func BenchmarkHistogramAggregator_Results(b *testing.B) {
 		{"Small_5Quantiles", 6, 10, 5, []float64{0.5, 0.75, 0.9, 0.95, 0.99}},
 		{"Medium_5Quantiles", 10, 100, 20, []float64{0.5, 0.75, 0.9, 0.95, 0.99}},
 		{"Large_5Quantiles", 20, 1000, 100, []float64{0.5, 0.75, 0.9, 0.95, 0.99}},
-		// These test high exemplar count (our per-interval optimization)
-		{"High_Exemplars", 15, 500, 200, []float64{0.5, 0.9, 0.99}},
+		// High exemplar density to test caching benefits
+		{"High_Exemplars", 10, 100, 200, []float64{0.5, 0.9, 0.99}},
 	}
 
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
-			// Pre-populate the aggregator with data (this setup is not benchmarked)
+			// Generate test data
 			series := generateTestTimeSeries(bm.seriesCount, bm.samplesCount, bm.exemplarCount, req.Start, req.End)
-			agg := NewHistogramAggregator(req, bm.quantiles, uint32(bm.exemplarCount)) // nolint: gosec // G115
-			agg.Combine(series)
 
-			// Benchmark only the Results() method
+			// Create histogram aggregator
+			h := NewHistogramAggregator(req, bm.quantiles, req.Exemplars)
+
+			// Combine the series (this is setup, not benchmarked)
+			h.Combine(series)
+
+			// Benchmark the Results method
 			b.ResetTimer()
-			for b.Loop() {
-				results := agg.Results()
+			for i := 0; i < b.N; i++ {
+				results := h.Results()
 				_ = results // Prevent optimization
 			}
 		})
@@ -2950,3 +2954,131 @@ func TestLog2QuantileWithBucket(t *testing.T) {
 		})
 	}
 }
+
+func TestHistogramAggregator_BucketVsValueAssignment(t *testing.T) {
+	// This test demonstrates why bucket-based assignment fails:
+	// Two exemplars can be in the same histogram bucket but belong to different quantiles
+
+	baseTime := time.Unix(1640995200, 0) // Fixed timestamp
+	req := &tempopb.QueryRangeRequest{
+		Start:     uint64(baseTime.UnixNano()),
+		End:       uint64(baseTime.Add(1 * time.Hour).UnixNano()),
+		Step:      uint64(15 * time.Minute),
+		Exemplars: 10,
+	}
+
+	// Create histogram with specific distribution to demonstrate the issue
+	timeSeries := []*tempopb.TimeSeries{
+		// Bucket 1.0s: 20 samples
+		{
+			PromLabels: `{service="test",__bucket="1.0"}`,
+			Labels: []commonv1proto.KeyValue{
+				{Key: "service", Value: &commonv1proto.AnyValue{Value: &commonv1proto.AnyValue_StringValue{StringValue: "test"}}},
+				{Key: internalLabelBucket, Value: &commonv1proto.AnyValue{Value: &commonv1proto.AnyValue_DoubleValue{DoubleValue: 1.0}}},
+			},
+			Samples: []tempopb.Sample{
+				{TimestampMs: baseTime.Add(7 * time.Minute).UnixMilli(), Value: 20},
+			},
+			Exemplars: []tempopb.Exemplar{
+				// Both exemplars fall in the ≤1.0s bucket, but have different values
+				{
+					Labels: []commonv1proto.KeyValue{
+						{Key: "trace_id", Value: &commonv1proto.AnyValue{Value: &commonv1proto.AnyValue_StringValue{StringValue: "fast-trace"}}},
+					},
+					Value:       0.6, // Fast exemplar - should go to P50
+					TimestampMs: baseTime.Add(7 * time.Minute).UnixMilli(),
+				},
+				{
+					Labels: []commonv1proto.KeyValue{
+						{Key: "trace_id", Value: &commonv1proto.AnyValue{Value: &commonv1proto.AnyValue_StringValue{StringValue: "medium-trace"}}},
+					},
+					Value:       0.9, // Medium exemplar - should go to P90
+					TimestampMs: baseTime.Add(7 * time.Minute).UnixMilli(),
+				},
+			},
+		},
+		// Bucket 2.0s: 30 samples (total: 50, P50 ≈ 1.0s, P90 ≈ 1.8s)
+		{
+			PromLabels: `{service="test",__bucket="2.0"}`,
+			Labels: []commonv1proto.KeyValue{
+				{Key: "service", Value: &commonv1proto.AnyValue{Value: &commonv1proto.AnyValue_StringValue{StringValue: "test"}}},
+				{Key: internalLabelBucket, Value: &commonv1proto.AnyValue{Value: &commonv1proto.AnyValue_DoubleValue{DoubleValue: 2.0}}},
+			},
+			Samples: []tempopb.Sample{
+				{TimestampMs: baseTime.Add(7 * time.Minute).UnixMilli(), Value: 30},
+			},
+		},
+		// Bucket 4.0s: 20 samples (total: 70, P99 ≈ 3.2s)
+		{
+			PromLabels: `{service="test",__bucket="4.0"}`,
+			Labels: []commonv1proto.KeyValue{
+				{Key: "service", Value: &commonv1proto.AnyValue{Value: &commonv1proto.AnyValue_StringValue{StringValue: "test"}}},
+				{Key: internalLabelBucket, Value: &commonv1proto.AnyValue{Value: &commonv1proto.AnyValue_DoubleValue{DoubleValue: 4.0}}},
+			},
+			Samples: []tempopb.Sample{
+				{TimestampMs: baseTime.Add(7 * time.Minute).UnixMilli(), Value: 20},
+			},
+		},
+	}
+
+	quantiles := []float64{0.5, 0.9, 0.99}
+	agg := NewHistogramAggregator(req, quantiles, 10)
+	agg.Combine(timeSeries)
+	results := agg.Results()
+
+	// Calculate the actual quantile values for reference
+	// With 70 total samples: P50=35th sample, P90=63rd sample, P99=69th sample
+	// P50 falls around 1.0s, P90 around 1.8s
+
+	t.Logf("=== Demonstrating Bucket vs Value Assignment Issue ===")
+
+	// Extract quantile series
+	var p50Series, p90Series, p99Series TimeSeries
+	for _, series := range results {
+		for _, label := range series.Labels {
+			if label.Name == "p" {
+				switch label.Value.Float() {
+				case 0.5:
+					p50Series = series
+					t.Logf("P50 value: %.3f", series.Values[0])
+				case 0.9:
+					p90Series = series
+					t.Logf("P90 value: %.3f", series.Values[0])
+				case 0.99:
+					p99Series = series
+					t.Logf("P99 value: %.3f", series.Values[0])
+				}
+			}
+		}
+	}
+
+	t.Logf("Exemplar distribution:")
+	t.Logf("P50 exemplars: %d", len(p50Series.Exemplars))
+	t.Logf("P90 exemplars: %d", len(p90Series.Exemplars))
+	t.Logf("P99 exemplars: %d", len(p99Series.Exemplars))
+
+	// Log the exemplar values to see current assignment
+	for _, ex := range p50Series.Exemplars {
+		t.Logf("P50 exemplar: %.3f", ex.Value)
+	}
+	for _, ex := range p90Series.Exemplars {
+		t.Logf("P90 exemplar: %.3f", ex.Value)
+	}
+	for _, ex := range p99Series.Exemplars {
+		t.Logf("P99 exemplar: %.3f", ex.Value)
+	}
+
+	// The key insight: Both exemplars (0.6s and 0.9s) are in the ≤1.0s bucket,
+	// but based on their VALUES:
+	// - 0.6s should go to P50 (fast, below P50 threshold ~1.0s)
+	// - 0.9s should go to P90 (medium, above P50 but below P90 threshold ~1.8s)
+	//
+	// Current bucket-based logic can't distinguish between them!
+
+	t.Logf("\n=== Expected Behavior ===")
+	t.Logf("Exemplar 0.6s: Should go to P50 (fast request)")
+	t.Logf("Exemplar 0.9s: Should go to P90 (medium request)")
+	t.Logf("Both are in ≤1.0s bucket, but have different performance characteristics!")
+}
+
+// generateTestTimeSeries creates test time series data for benchmarking

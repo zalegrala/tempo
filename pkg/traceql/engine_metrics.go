@@ -1560,12 +1560,7 @@ func (h *HistogramAggregator) Results() SeriesSet {
 		return buckets[i].Max < buckets[j].Max
 	})
 
-	quantileValues := make([]float64, len(h.qs))
-	for i, q := range h.qs {
-		quantileValues[i] = Log2Quantile(q, buckets)
-	}
-
-	// Build results using the calculated quantile values
+	// Build results using per-interval quantile calculations
 	for _, in := range h.ss {
 		// Pre-sort all interval buckets once for efficiency
 		sortedIntervalBuckets := make([][]HistogramBucket, len(in.hist))
@@ -1580,8 +1575,14 @@ func (h *HistogramAggregator) Results() SeriesSet {
 			}
 		}
 
-		// For each input series, we create a new series for each quantile.
-		for qIdx, q := range h.qs {
+		// Process quantiles in reverse order (p99 → p90 → p50) for better exemplar distribution
+		remainingExemplars := make([]Exemplar, len(in.exemplars))
+		copy(remainingExemplars, in.exemplars)
+
+		for i := len(h.qs) - 1; i >= 0; i-- {
+			qIdx := i
+			q := h.qs[qIdx]
+
 			// Append label for the quantile
 			labels := append((Labels)(nil), in.labels...)
 			labels = append(labels, Label{"p", NewStaticFloat(q)})
@@ -1592,18 +1593,23 @@ func (h *HistogramAggregator) Results() SeriesSet {
 				Values: make([]float64, len(in.hist)),
 			}
 
-			for i := range in.hist {
-				if len(sortedIntervalBuckets[i]) == 0 {
-					ts.Values[i] = 0.0
+			for j := range in.hist {
+				if len(sortedIntervalBuckets[j]) == 0 {
+					ts.Values[j] = 0.0
 					continue
 				}
 
 				// Use pre-sorted buckets for quantile calculation
-				ts.Values[i] = Log2Quantile(q, sortedIntervalBuckets[i])
+				ts.Values[j] = Log2Quantile(q, sortedIntervalBuckets[j])
 			}
 
-			// Select exemplars using per-interval semantic matching with exemplars from this specific grouping
-			ts.Exemplars = h.selectExemplarsWithIntervalMatching(in.exemplars, sortedIntervalBuckets, qIdx)
+			// Select exemplars using range-based matching, removing assigned ones
+			var assignedExemplars []Exemplar
+			var unassignedExemplars []Exemplar
+
+			assignedExemplars, unassignedExemplars = h.selectExemplarsForQuantileRange(remainingExemplars, buckets, qIdx)
+			ts.Exemplars = assignedExemplars
+			remainingExemplars = unassignedExemplars
 
 			results[s] = ts
 		}
@@ -1611,58 +1617,51 @@ func (h *HistogramAggregator) Results() SeriesSet {
 	return results
 }
 
-// selectExemplarsWithIntervalMatching assigns exemplars based on their time interval context.
-// Each exemplar is compared against the quantile threshold from its specific interval.
-func (h *HistogramAggregator) selectExemplarsWithIntervalMatching(allExemplars []Exemplar, histSeries [][]HistogramBucket, quantileIdx int) []Exemplar {
-	if len(allExemplars) == 0 {
-		return nil
+// selectExemplarsForQuantileRange assigns exemplars to the specified quantile based on bucket range.
+// Exemplars are assigned to a quantile if they fall in the same bucket or below the quantile bucket.
+// Returns assigned exemplars and remaining unassigned exemplars.
+func (h *HistogramAggregator) selectExemplarsForQuantileRange(allExemplars []Exemplar, aggregatedBuckets []HistogramBucket, quantileIdx int) ([]Exemplar, []Exemplar) {
+	if len(allExemplars) == 0 || len(aggregatedBuckets) == 0 {
+		return nil, allExemplars
 	}
 
-	var result []Exemplar
+	// Only calculate the bucket index for the specific quantile we're processing
+	_, targetQuantileBucketIdx := Log2QuantileWithBucket(h.qs[quantileIdx], aggregatedBuckets)
+	if targetQuantileBucketIdx == -1 {
+		return nil, allExemplars // Invalid quantile calculation
+	}
+
+	var assigned []Exemplar
+	var remaining []Exemplar
+
 	for _, exemplar := range allExemplars {
-		// Determine which time interval this exemplar belongs to
-		intervalIdx := IntervalOfMs(int64(exemplar.TimestampMs), h.start, h.end, h.step)
-		if intervalIdx < 0 || intervalIdx >= len(histSeries) {
-			continue // Exemplar outside our time range
-		}
+		// Find which bucket this exemplar's value falls into
+		exemplarBucketIdx := h.findBucketIndex(exemplar.Value, aggregatedBuckets)
 
-		// Get the histogram buckets for this specific interval
-		intervalBuckets := histSeries[intervalIdx]
-		if len(intervalBuckets) == 0 {
-			continue // No data in this interval
-		}
-
-		// Calculate quantile thresholds for all quantiles in this interval
-		intervalQuantileValues := make([]float64, len(h.qs))
-		for i, q := range h.qs {
-			intervalQuantileValues[i] = Log2Quantile(q, intervalBuckets)
-		}
-
-		// Assign exemplar to the appropriate quantile based on interval-specific thresholds
-		targetQuantileIdx := h.determineTargetQuantile(exemplar.Value, intervalQuantileValues)
-		if targetQuantileIdx == quantileIdx {
-			result = append(result, exemplar)
+		// Range-based assignment: exemplar bucket <= quantile bucket
+		if exemplarBucketIdx <= targetQuantileBucketIdx {
+			assigned = append(assigned, exemplar)
+		} else {
+			remaining = append(remaining, exemplar)
 		}
 	}
 
-	return result
+	return assigned, remaining
 }
 
-// determineTargetQuantile determines which quantile an exemplar should be assigned to
-// by comparing its value against the calculated quantile thresholds.
-func (h *HistogramAggregator) determineTargetQuantile(exemplarValue float64, quantileValues []float64) int {
-	// Assign to the smallest quantile that can contain this exemplar
-	// e.g., if exemplar is 1.5s and p50=0.5s, p90=2.0s, p99=5.0s
-	// then 1.5s goes to p90 (since 1.5s > p50 but <= p90)
-
-	for i := 0; i < len(quantileValues); i++ {
-		if exemplarValue <= quantileValues[i] {
+// findBucketIndex determines which bucket an exemplar value falls into.
+// Returns the index of the first bucket where exemplarValue <= bucket.Max.
+func (h *HistogramAggregator) findBucketIndex(exemplarValue float64, buckets []HistogramBucket) int {
+	for i, bucket := range buckets {
+		if exemplarValue <= bucket.Max {
 			return i
 		}
 	}
-
-	// If exemplar is above all quantile thresholds, assign to the highest quantile
-	return len(quantileValues) - 1
+	// If exemplar value is above all buckets, return the last bucket index
+	if len(buckets) > 0 {
+		return len(buckets) - 1
+	}
+	return -1
 }
 
 func (h *HistogramAggregator) Length() int {
