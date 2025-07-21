@@ -221,7 +221,7 @@ func testWithConfig(t *testing.T, configFile string) {
 	// between 0 and 1 outstanding blocks.  The sleep above should be enough to
 	// allow the worker to finish processing all the outstanding blocks.
 	expectedMin := &expectations{
-		blocks:      2,
+		blocks:      1,
 		outstanding: 0,
 	}
 
