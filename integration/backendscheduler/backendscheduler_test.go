@@ -123,11 +123,14 @@ func testWithConfig(t *testing.T, configFile string) {
 	// to grow as well.
 	accumulant := make(map[string]*expectations)
 	totalOutstanding := 0
+	totalBlocksWritten := 0
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Populate the backend with the specified number of tenants, blocks, and records
 			tenants = populateBackend(ctx, t, tempodbWriter, tc.tenantCount, tc.blockCount, 1)
+
+			totalBlocksWritten += tc.tenantCount * tc.blockCount
 
 			if _, ok := accumulant[tenant]; !ok {
 				accumulant[tenant] = &expectations{}
@@ -156,6 +159,12 @@ func testWithConfig(t *testing.T, configFile string) {
 	}
 
 	time.Sleep(8 * time.Second) // Wait for polling and measurement to catch up
+
+	// Capture the total blocks which have been written
+	totlalBlocksPreCompactions, err := scheduler.SumMetrics([]string{"tempodb_blocklist_length"})
+	require.NoError(t, err)
+	require.Len(t, totlalBlocksPreCompactions, 1, "expected only one blocklist length metric")
+	require.Equal(t, float64(totalBlocksWritten), totlalBlocksPreCompactions[0], "expected total blocks to match the sum of all tenants")
 
 	// NOTE: the compaction provider has a channel capacity of 1, and the
 	// backendscheduler has a channel capacity of 1.  This means that the
@@ -202,11 +211,11 @@ func testWithConfig(t *testing.T, configFile string) {
 		t.Run(fmt.Sprintf("work-finished-check-wait-%s", tenantID), func(t *testing.T) {
 			tenantMatcher := e2e.WithLabelMatchers(&labels.Matcher{Type: labels.MatchEqual, Name: "tenant", Value: tenantID})
 
-			// Due to timing, we may have 2 or three blocks per tenant
-			require.NoError(t, scheduler.WaitSumMetricsWithOptions(e2e.GreaterOrEqual(float64(2)), []string{"tempodb_blocklist_length"},
+			// We should have at least 1 block for each tenant
+			require.NoError(t, scheduler.WaitSumMetricsWithOptions(e2e.GreaterOrEqual(1.0), []string{"tempodb_blocklist_length"},
 				e2e.WaitMissingMetrics,
 				tenantMatcher,
-				printMetricValue(t, fmt.Sprintf("%d+", 2), "tempodb_blocklist_length"),
+				printMetricValue(t, fmt.Sprintf("%f+", 1.0), "tempodb_blocklist_length"),
 			))
 		})
 	}
@@ -215,6 +224,15 @@ func testWithConfig(t *testing.T, configFile string) {
 
 	// Stop the worker to ensure it is not running while we check the metrics.
 	require.NoError(t, s.Stop(worker))
+
+	// Require that all jobs which have been processed are not failed.
+	_, err = scheduler.SumMetrics([]string{"tempo_backend_scheduler_jobs_failed_total"})
+	require.Error(t, err, "metric not found")
+
+	totlalBlocksPostCompactions, err := scheduler.SumMetrics([]string{"tempodb_blocklist_length"})
+	require.NoError(t, err)
+	require.Len(t, totlalBlocksPostCompactions, 1, "expected only one blocklist length metric")
+	require.Less(t, totlalBlocksPostCompactions[0], totlalBlocksPreCompactions[0], "expected total blocks to be less after compaction")
 
 	// Some variance in the number of expected due to the notes above.  We should
 	// expect that a fully compacted tenant has between 2 and 4 blocks, and
