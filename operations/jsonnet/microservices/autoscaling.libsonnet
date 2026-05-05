@@ -9,7 +9,8 @@
 
   _config+:: {
     // Prometheus server address used by all KEDA Prometheus triggers.
-    autoscaling_prometheus_url: 'http://prometheus.default:9090/prometheus',
+    // Must be set explicitly when enabling any Prometheus-based autoscaler (e.g. backend_worker).
+    autoscaling_prometheus_url: '',
     // Optional tenant ID sent as the X-Scope-OrgID header on every KEDA Prometheus
     // scrape request. Required when the backend is a multi-tenant system such as
     // Grafana Mimir. Leave empty (default) for single-tenant setups.
