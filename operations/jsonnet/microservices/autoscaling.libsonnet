@@ -106,6 +106,21 @@
       else $.tempo_block_builder_statefulset.spec.replicas,
   },
 
+  // Returns a KEDA Prometheus trigger using the shared autoscaling_prometheus_url and
+  // autoscaling_prometheus_tenant config. All Prometheus-based scalers should use this
+  // so that the URL and X-Scope-OrgID header are configured in one place.
+  prometheusTrigger(query, metricName, threshold):: {
+    type: 'prometheus',
+    metadata: {
+      serverAddress: $._config.autoscaling_prometheus_url,
+      [if $._config.autoscaling_prometheus_tenant != '' then 'customHeaders']:
+        'X-Scope-OrgID=%s' % $._config.autoscaling_prometheus_tenant,
+      metricName: metricName,
+      query: query,
+      threshold: threshold,
+    },
+  },
+
   // Create a KEDA ScaledObject for a target controller with configurable scaling behavior.
   scaledObjectForController(target, configKey)::
     assert std.objectHas($._config, configKey) : '$._config must have key ' + configKey;
@@ -202,17 +217,13 @@
     if $._config.backend_worker.keda.enabled then
       assert $._config.autoscaling_prometheus_url != '' : 'autoscaling_prometheus_url is required for backend_worker autoscaling';
       $.scaledObjectForController($.tempo_backend_worker_statefulset, 'backend_worker')
-      + scaledObject.spec.withTriggersMixin([{
-        type: 'prometheus',
-        metadata: {
-          serverAddress: $._config.autoscaling_prometheus_url,
-          [if $._config.autoscaling_prometheus_tenant != '' then 'customHeaders']:
-            'X-Scope-OrgID=%s' % $._config.autoscaling_prometheus_tenant,
-          metricName: 'tempodb_compaction_outstanding_blocks',
-          query: $._config.backend_worker.keda.query,
-          threshold: '%d' % $._config.backend_worker.keda.threshold,
-        },
-      }])
+      + scaledObject.spec.withTriggersMixin([
+        $.prometheusTrigger(
+          query=$._config.backend_worker.keda.query,
+          metricName='tempodb_compaction_outstanding_blocks',
+          threshold='%d' % $._config.backend_worker.keda.threshold,
+        ),
+      ])
     else {},
 
   tempo_backend_worker_statefulset+:
