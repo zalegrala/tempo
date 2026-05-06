@@ -213,7 +213,7 @@ func testCompactWithConfig(t *testing.T, targetBlockVersion string) {
 
 	ctx := context.Background()
 
-	blocks := cutTestBlocks(t, w, testTenantID, 10, 10)
+	blocks := cutTestBlocks(t, w, 10, 10)
 	metas := make([]*backend.BlockMeta, 0)
 	for _, b := range blocks {
 		metas = append(metas, b.BlockMeta())
@@ -236,13 +236,13 @@ func testCompactWithConfig(t *testing.T, targetBlockVersion string) {
 	require.NoError(t, err)
 }
 
-func cutTestBlocks(t testing.TB, w Writer, tenantID string, blockCount int, recordCount int) []common.BackendBlock {
+func cutTestBlocks(t testing.TB, w Writer, blockCount int, recordCount int) []common.BackendBlock {
 	blocks := make([]common.BackendBlock, 0)
 	dec := model.MustNewSegmentDecoder(model.CurrentEncoding)
 
 	wal := w.WAL()
 	for i := 0; i < blockCount; i++ {
-		meta := &backend.BlockMeta{BlockID: backend.NewUUID(), TenantID: tenantID}
+		meta := &backend.BlockMeta{BlockID: backend.NewUUID(), TenantID: testTenantID}
 		head, err := wal.NewBlock(meta, model.CurrentEncoding)
 		require.NoError(t, err)
 
@@ -266,6 +266,25 @@ func makeTraceID(i int, j int) []byte {
 	binary.LittleEndian.PutUint64(id, uint64(i))
 	binary.LittleEndian.PutUint64(id[8:], uint64(j))
 	return id
+}
+
+type testData struct {
+	id         common.ID
+	t          *tempopb.Trace
+	start, end uint32
+}
+
+func cutTestBlockWithTraces(t testing.TB, w Writer, data []testData) common.BackendBlock {
+	dec := model.MustNewSegmentDecoder(model.CurrentEncoding)
+	meta := &backend.BlockMeta{BlockID: backend.NewUUID(), TenantID: testTenantID}
+	head, err := w.WAL().NewBlock(meta, model.CurrentEncoding)
+	require.NoError(t, err)
+	for _, d := range data {
+		writeTraceToWal(t, head, dec, d.id, d.t, d.start, d.end)
+	}
+	b, err := w.CompleteBlock(context.Background(), head)
+	require.NoError(t, err)
+	return b
 }
 
 func TestCompactionRoundtrip(t *testing.T) {
@@ -379,6 +398,71 @@ func testCompactionRoundtrip(t *testing.T, targetBlockVersion string) {
 	}
 }
 
+func TestCompactionHonorsBlockStartEndTimes(t *testing.T) {
+	for _, enc := range encoding.AllEncodingsForWrites() {
+		t.Run(enc.Version(), func(t *testing.T) {
+			t.Parallel()
+			testCompactionHonorsBlockStartEndTimes(t, enc.Version())
+		})
+	}
+}
+
+func testCompactionHonorsBlockStartEndTimes(t *testing.T, targetBlockVersion string) {
+	tempDir := t.TempDir()
+
+	r, w, c, err := New(&Config{
+		Backend: backend.Local,
+		Pool: &pool.Config{
+			MaxWorkers: 10,
+			QueueDepth: 100,
+		},
+		Local: &local.Config{
+			Path: path.Join(tempDir, "traces"),
+		},
+		Block: &common.BlockConfig{
+			BloomFP:             .01,
+			BloomShardSizeBytes: 100_000,
+			Version:             targetBlockVersion,
+			RowGroupSizeBytes:   30_000_000,
+		},
+		WAL: &wal.Config{
+			Filepath:       path.Join(tempDir, "wal"),
+			IngestionSlack: time.Since(time.Unix(0, 0)), // allow explicit start/end times below
+		},
+		BlocklistPoll: 0,
+	}, nil, log.NewNopLogger())
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	r.EnablePolling(ctx, &mockJobSharder{}, false)
+
+	cutTestBlockWithTraces(t, w, []testData{
+		{test.ValidTraceID(nil), test.MakeTrace(10, nil), 100, 101},
+		{test.ValidTraceID(nil), test.MakeTrace(10, nil), 102, 103},
+	})
+	cutTestBlockWithTraces(t, w, []testData{
+		{test.ValidTraceID(nil), test.MakeTrace(10, nil), 104, 105},
+		{test.ValidTraceID(nil), test.MakeTrace(10, nil), 106, 107},
+	})
+
+	rw := r.(*readerWriter)
+	rw.pollBlocklist(ctx)
+
+	cfg := &CompactorConfig{
+		MaxCompactionRange:   24 * time.Hour,
+		MaxCompactionObjects: 1000,
+		MaxBlockBytes:        100_000_000,
+	}
+	_, err = c.CompactWithConfig(ctx, rw.blocklist.Metas(testTenantID), testTenantID, cfg, &mockSharder{}, &mockOverrides{})
+	require.NoError(t, err)
+
+	blocks := rw.blocklist.Metas(testTenantID)
+	require.Equal(t, 1, len(blocks))
+	require.Equal(t, uint32(1), blocks[0].CompactionLevel)
+	require.Equal(t, 100, int(blocks[0].StartTime.Unix()))
+	require.Equal(t, 107, int(blocks[0].EndTime.Unix()))
+}
+
 func BenchmarkCompaction(b *testing.B) {
 	for _, enc := range encoding.AllEncodingsForWrites() {
 		b.Run(enc.Version(), func(b *testing.B) {
@@ -417,7 +501,7 @@ func benchmarkCompaction(b *testing.B, targetBlockVersion string) {
 	traceCount := 20_000
 	blockCount := 8
 
-	blocks := cutTestBlocks(b, w, testTenantID, blockCount, traceCount)
+	blocks := cutTestBlocks(b, w, blockCount, traceCount)
 	metas := make([]*backend.BlockMeta, 0, len(blocks))
 	for _, blk := range blocks {
 		metas = append(metas, blk.BlockMeta())

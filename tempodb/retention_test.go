@@ -176,7 +176,7 @@ func TestBlockRetentionOverride(t *testing.T) {
 	ctx := context.Background()
 	r.EnablePolling(ctx, &mockJobSharder{}, false)
 
-	cutTestBlocks(t, w, testTenantID, 10, 10)
+	cutTestBlocks(t, w, 10, 10)
 
 	// The test spans are all 1 second long, so we have to sleep to put all the
 	// data in the past
@@ -238,7 +238,7 @@ func TestBlockRetentionOverrideDisabled(t *testing.T) {
 	ctx := context.Background()
 	r.EnablePolling(ctx, &mockJobSharder{}, false)
 
-	cutTestBlocks(t, w, testTenantID, 10, 10)
+	cutTestBlocks(t, w, 10, 10)
 
 	// The test spans are all 1 second long, so we have to sleep to put all the
 	// data in the past
@@ -300,7 +300,7 @@ func testRetainWithConfig(t *testing.T, targetBlockVersion string) {
 
 	r.EnablePolling(ctx, &mockJobSharder{}, false)
 
-	blocks := cutTestBlocks(t, w, testTenantID, 10, 10)
+	blocks := cutTestBlocks(t, w, 10, 10)
 
 	metas := make([]*backend.BlockMeta, 0)
 	for _, b := range blocks {
