@@ -1,13 +1,13 @@
 ## main / unreleased
 
+* [CHANGE] Remove `max_time_per_tenant` and `compaction_cycle` from `CompactorConfig`. These fields were only used by the now-deleted ring-based compaction path. [#6990](https://github.com/grafana/tempo/pull/6990) (@zalegrala)
+
 # v3.0.0-rc.1
 
 * [CHANGE] Stop publishing 32-bit ARM binary archives. Release artifacts continue to include amd64 and arm64 binaries. [#7106](https://github.com/grafana/tempo/pull/7106) (@javiermolinar)
 
 # v3.0.0-rc.0
 
-* [BUGFIX] Fix tempo-vulture ignoring `-tempo-push-tls` flag in normal operating mode. [#6974](https://github.com/grafana/tempo/pull/6974) (@xaque208)
-* [CHANGE] Remove `max_time_per_tenant` and `compaction_cycle` from `CompactorConfig`. These fields were only used by the now-deleted ring-based compaction path. [#6990](https://github.com/grafana/tempo/pull/6990) (@zalegrala)
 * [BUGFIX] Fix tempo-vulture ignoring `-tempo-push-tls` flag in normal operating mode. [#6974](https://github.com/grafana/tempo/pull/6974) (@xaque208)
 * [CHANGE] **BREAKING CHANGE** Remove duplicate "compaction" prefix from CompactorConfig CLI flags. Affected flags: `compaction.block-retention`, `compaction.max-objects-per-block`, `compaction.max-block-bytes`, `compaction.compaction-window`. [#6909](https://github.com/grafana/tempo/pull/6909) (@electron0zero)
 * [CHANGE] **BREAKING CHANGE** Enable RetryInfo by default. `distributor.retry_after_on_resource_exhausted` now defaults to `5s` (was `0`) so OTLP clients receive a retry hint on `ResourceExhausted` errors. [#7088](https://github.com/grafana/tempo/pull/7088) (@electron0zero)
