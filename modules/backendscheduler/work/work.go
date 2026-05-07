@@ -301,10 +301,14 @@ func (w *Work) Prune(ctx context.Context) {
 	for _, shardJobs := range timedOut {
 		for _, j := range shardJobs {
 			for _, key := range runningBlockKeys(j) {
-				delete(w.runningBlocks, key)
+				if w.runningBlocks[key] == j {
+					delete(w.runningBlocks, key)
+				}
 			}
 			if wid := j.GetWorkerID(); wid != "" {
-				delete(w.workerJobs, wid)
+				if w.workerJobs[wid] == j.ID {
+					delete(w.workerJobs, wid)
+				}
 			}
 		}
 	}
