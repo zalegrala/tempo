@@ -78,32 +78,50 @@
       },
     },
 
-    // Block builder scales to match live-store zone-a pods via KEDA kubernetes-workload scaler.
-    // See: https://github.com/grafana/tempo/issues/6933
-    block_builder+: {
+    live_store+: {
       keda: {
         enabled: false,
         min_replicas: 1,
-        max_replicas: 200,
+        max_replicas: 20,
         paused_replicas: 0,
-        // Number of partitions each block-builder pod handles.
-        // KEDA sets replicas = ceil(live-store-zone-a pods / partitions_per_instance).
-        partitions_per_instance: 1,
-        // Pod selector to count live-store zone-a pods.
-        pod_selector: 'name=live-store-zone-a',
+        // Time window (seconds) over which bytes written to Kafka are expected
+        // to be held in the live-store. Should be >= complete_block_timeout (20m
+        // default) plus any query_backend_after delay. Default: 30 minutes.
+        window_seconds: 30 * 60,
+        // Maximum bytes a single live-store pod is expected to hold over window_seconds.
+        // Expressed as ingest_rate_per_pod × window_seconds so the two knobs stay coupled:
+        //   default: 10 MB/s × 1800s ≈ 16 GiB per pod (observed production baseline)
+        // To tune for your environment, change the rate multiplier:
+        //   1 MB/s per pod  → 1 * 1000 * 1000 * self.window_seconds  (~1.7 GiB at 30m)
+        //   5 MB/s per pod  → 5 * 1000 * 1000 * self.window_seconds  (~8.4 GiB at 30m)
+        // Alternatively, set a literal byte value if you prefer to reason purely about
+        // total bytes held per pod (e.g. bytes_per_replica: 17 * 1024 * 1024 * 1024).
+        bytes_per_replica: 10 * 1000 * 1000 * self.window_seconds,
+        // Prometheus query returning total expected bytes held across all live-store
+        // pods. When empty (default), the ScaledObject derives the query from
+        // window_seconds and tempo_distributor_kafka_write_bytes_total.
+        // Override to use a fully custom query for your environment.
+        query: '',
         scale_up_stabilization_window_seconds: 60,
-        scale_up_pods: 5,
+        scale_up_pods: 2,
         scale_up_period_seconds: 60,
-        scale_down_stabilization_window_seconds: 60 * 5,
-        scale_down_pods: 5,
+        // Hold the highest replica count for at least the downscale_delay so that
+        // a scale-down signal is not generated before pods have finished draining.
+        scale_down_stabilization_window_seconds: 60 * 35,
+        scale_down_pods: 1,
         scale_down_period_seconds: 60 * 5,
+        // Extra KEDA trigger objects appended after the default Prometheus trigger.
+        // Use this to inject environment-specific triggers (e.g. Kafka lag, CPU)
+        // from private config without requiring an upstream Jsonnet change.
+        // Each entry is a raw KEDA trigger object passed directly to withTriggersMixin.
+        additional_triggers: [],
       },
     },
 
-    // Override block_builder_max_unavailable when block_builder autoscaling is enabled
-    // since the replica count is dynamic.
+    // When live-store KEDA is enabled the rollout-operator mirrors the ReplicaTemplate count
+    // to block-builder, so spec.replicas is hidden and max_unavailable must be '100%'.
     block_builder_max_unavailable:
-      if $._config.block_builder.keda.enabled then '100%'
+      if $._config.live_store.keda.enabled then '100%'
       else $.tempo_block_builder_statefulset.spec.replicas,
   },
 
@@ -230,22 +248,65 @@
   tempo_backend_worker_statefulset+:
     if $._config.backend_worker.keda.enabled then $.removeReplicasFromSpec else {},
 
+  // When live-store KEDA is enabled the rollout-operator mirrors the ReplicaTemplate count
+  // to block-builder — remove spec.replicas so every Tanka apply does not fight it.
+  tempo_block_builder_statefulset+:
+    if $._config.live_store.keda.enabled then $.removeReplicasFromSpec else {},
+
   //
-  // Block Builder: KEDA kubernetes-workload scaler matching live-store zone-a pod count.
+  // Live Store: Prometheus-based autoscaling on expected bytes held.
+  // Targets the ReplicaTemplate; the rollout-operator mirrors the replica count
+  // to both zone StatefulSets, which must not carry their own spec.replicas.
   //
-  tempo_block_builder_scaled_object:
-    if $._config.block_builder.keda.enabled then
-      assert $._config.block_builder.keda.partitions_per_instance > 0 : 'block_builder.keda.partitions_per_instance must be > 0';
-      $.scaledObjectForController($.tempo_block_builder_statefulset, 'block_builder')
-      + scaledObject.spec.withTriggersMixin([{
-        type: 'kubernetes-workload',
-        metadata: {
-          podSelector: $._config.block_builder.keda.pod_selector,
-          value: '%d' % $._config.block_builder.keda.partitions_per_instance,
-        },
-      }])
+  tempo_live_store_scaled_object:
+    if $._config.live_store.keda.enabled then
+      assert $._config.autoscaling_prometheus_url != '' : 'autoscaling_prometheus_url is required for live_store autoscaling';
+      local config = $._config.live_store.keda;
+      local query = if config.query != '' then config.query else
+        |||
+          sum(rate(tempo_distributor_kafka_write_bytes_total{namespace="%(namespace)s"}[10m])) * %(window_seconds)d
+        ||| % { namespace: $._config.namespace, window_seconds: config.window_seconds };
+      $.scaledObjectForController($.tempo_live_store_replica_template, 'live_store')
+      + scaledObject.spec.withTriggersMixin(
+        [
+          // metricType: Value → desiredReplicas = ceil(queryResult / threshold).
+          // The query returns total expected bytes across all pods, so we must use
+          // Value rather than the default AverageValue (which would multiply by
+          // currentReplicas and cause runaway scaling).
+          $.prometheusTrigger(
+            query=query,
+            metricName='tempo_live_store_expected_bytes',
+            threshold='%d' % config.bytes_per_replica,
+          ) + { metricType: 'Value' },
+        ] + config.additional_triggers
+      )
     else {},
 
-  tempo_block_builder_statefulset+:
-    if $._config.block_builder.keda.enabled then $.removeReplicasFromSpec else {},
+  // When KEDA manages the live-store, omit spec.replicas from the ReplicaTemplate
+  // so that KEDA exclusively owns that field and Tanka apply does not fight it.
+  tempo_live_store_replica_template+:
+    if $._config.live_store.keda.enabled then {
+      spec+: { replicas+:: null },
+    } else {},
+
+  tempo_live_store_zone_a_statefulset+:
+    if $._config.live_store.keda.enabled then $.removeReplicasFromSpec else {},
+
+  tempo_live_store_zone_b_statefulset+:
+    if $._config.live_store.keda.enabled then $.removeReplicasFromSpec else {},
+
+  // When live-store KEDA is enabled the rollout-operator mirrors replica counts from
+  // StatefulSets (e.g. live-store-zone-a/b) to the block-builder using the scale
+  // subresource. The base rollout-operator role only grants access to `statefulsets`
+  // and `statefulsets/status`, so we add the missing `statefulsets/scale: get` rule.
+  rollout_operator_role+:
+    if $._config.live_store.keda.enabled then
+      local role = $.rbac.v1.role;
+      local policyRule = $.rbac.v1.policyRule;
+      role.withRulesMixin([
+        policyRule.withApiGroups(['apps']) +
+        policyRule.withResources(['statefulsets/scale']) +
+        policyRule.withVerbs(['get']),
+      ])
+    else {},
 }
