@@ -78,6 +78,19 @@ type Config struct {
 	// explicitly; set to true when deploying as a Deployment (random pod names) to avoid
 	// the session-timeout delay on partition reassignment. Requires Kafka ingest enabled.
 	LeaveConsumerGroupOnShutdown bool `yaml:"leave_consumer_group_on_shutdown" category:"advanced"`
+
+	// SkipStaleBacklogOnStartup, when true, seeks each partition forward to the
+	// startup replay horizon (see StartupReplayHorizon) on startup instead of
+	// replaying from the committed offset. This avoids fetching and decoding
+	// backlog that the metrics ingestion slack would discard anyway, and keeps
+	// the partition-lag metric honest on restart. Requires Kafka ingest enabled.
+	SkipStaleBacklogOnStartup bool `yaml:"skip_stale_backlog_on_startup" category:"advanced"`
+
+	// StartupReplayHorizon bounds how far back a partition replays on startup
+	// when SkipStaleBacklogOnStartup is set: the generator seeks to the first
+	// record at/after now-StartupReplayHorizon. When zero it defaults to
+	// MetricsIngestionSlack, so the read horizon tracks the emit horizon.
+	StartupReplayHorizon time.Duration `yaml:"startup_replay_horizon" category:"advanced"`
 }
 
 // RegisterFlagsAndApplyDefaults registers the flags.
@@ -103,6 +116,18 @@ func (cfg *Config) RegisterFlagsAndApplyDefaults(prefix string, f *flag.FlagSet)
 	}
 	f.StringVar(&cfg.InstanceID, prefix+".instance-id", hostname, "Instance id.")
 	f.BoolVar(&cfg.LeaveConsumerGroupOnShutdown, prefix+".leave-consumer-group-on-shutdown", false, "If true, send LeaveGroup to Kafka on shutdown for immediate partition reassignment. Default false; set to true for Deployment rollouts where pod names change on each restart.")
+	f.BoolVar(&cfg.SkipStaleBacklogOnStartup, prefix+".skip-stale-backlog-on-startup", false, "If true, seek partitions forward to now-startup-replay-horizon on startup instead of replaying from the committed offset, skipping backlog the ingestion slack would drop. Requires Kafka ingest.")
+	f.DurationVar(&cfg.StartupReplayHorizon, prefix+".startup-replay-horizon", 0, "How far back a partition replays on startup when skip-stale-backlog-on-startup is set. Zero defaults to metrics_ingestion_time_range_slack.")
+}
+
+// startupReplayHorizon returns how far back a partition should replay on startup
+// when SkipStaleBacklogOnStartup is enabled. It defaults to the metrics
+// ingestion slack so the read horizon tracks the emit horizon.
+func (cfg *Config) startupReplayHorizon() time.Duration {
+	if cfg.StartupReplayHorizon > 0 {
+		return cfg.StartupReplayHorizon
+	}
+	return cfg.MetricsIngestionSlack
 }
 
 func (cfg *Config) Validate() error {

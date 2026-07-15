@@ -1,5 +1,7 @@
 <!-- next version -->
 
+* [ENHANCEMENT] metrics-generator: add `skip_stale_backlog_on_startup` to seek partitions forward to the ingestion-slack horizon on startup instead of replaying backlog the slack would discard, keeping the partition-lag metric honest on restart. [#0000](https://github.com/grafana/tempo/pull/0000) (@zalegrala)
+
 # v3.0.2
 
 * [CHANGE] Upgrade Tempo to Go 1.26.3 [#7423](https://github.com/grafana/tempo/pull/7423) (@ie-pham)

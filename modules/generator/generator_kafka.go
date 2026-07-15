@@ -260,3 +260,19 @@ func revokePartitions(assigned, revoked []int32) []int32 {
 	// Resize assigned to only include retained elements
 	return assigned[:k]
 }
+
+// kafkaOffsetNone marks the absence of a committed group offset for a partition.
+const kafkaOffsetNone = int64(-1)
+
+// startupSeekOffset decides which offset to resume a partition from at startup
+// when skip_stale_backlog_on_startup is enabled. It never rewinds behind the
+// committed offset, but skips forward to horizonOffset (the offset of the first
+// record at/after now-horizon) when the committed offset is behind that horizon
+// or absent. The returned bool reports whether an explicit seek is needed;
+// false means resume from the committed offset as usual.
+func startupSeekOffset(committed, horizonOffset int64) (int64, bool) {
+	if committed != kafkaOffsetNone && committed >= horizonOffset {
+		return committed, false
+	}
+	return horizonOffset, true
+}
