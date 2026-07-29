@@ -1,0 +1,21 @@
+# One of: breaking | change | feature | enhancement | bug_fix | security
+change_type: enhancement
+
+# Component or area of the change.
+component: query-frontend
+
+# A brief description of the change.
+note: Cache tag and tag-value (metadata) results even when the search time range does not fully encapsulate the block
+
+# (Optional) PR number(s), e.g. [7339]. Leave blank to auto-fill at release.
+issues: []
+
+# (Optional) Additional lines rendered under the note.
+subtext: |
+  A block's tag/tag-value result is independent of the search time range, so metadata
+  sub-requests are now cacheable for partially-overlapping windows (e.g. short typeahead
+  ranges), avoiding repeated backend block scans. Span search and query range still require
+  the search range to encapsulate the block.
+
+# The GitHub handle (without the leading @) of the change's author.
+user: zalegrala
