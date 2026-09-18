@@ -1,9 +1,6 @@
 <!-- next version -->
 
 # v3.1.0-rc.1
-* [CHANGE] Remove `max_time_per_tenant` and `compaction_cycle` from `CompactorConfig`. These fields were only used by the now-deleted ring-based compaction path. [#6990](https://github.com/grafana/tempo/pull/6990) (@zalegrala)
-
-# v3.0.0-rc.1
 
 ## 🧰 Bug fixes 🧰
 
@@ -275,9 +272,6 @@
 * [CHANGE] **BREAKING CHANGE** Recent data queries guarantee complete results by failing when an instance is lagging. Defaults `query_frontend.query_end_cutoff` to `30s` and `live_store.fail_on_high_lag` to `true`. [#7210](https://github.com/grafana/tempo/pull/7210) (@mapno)
 * [CHANGE] **BREAKING CHANGE** user-configurable overrides config `metrics_generator.processors` no longer merges with runtime overrides. `metrics_generator.processors` now takes precedence over the runtime overrides, matching every other config in user-configurable overrides. Setting `processors: []` disables all processors for the tenant. [#7176](https://github.com/grafana/tempo/pull/7176) (@electron0zero)
 * [CHANGE] Stop publishing 32-bit ARM binary archives. Release artifacts continue to include amd64 and arm64 binaries. [#7106](https://github.com/grafana/tempo/pull/7106) (@javiermolinar)
-
-# v3.0.0-rc.0
-
 * [CHANGE] **BREAKING CHANGE** Remove duplicate "compaction" prefix from CompactorConfig CLI flags. Affected flags: `compaction.block-retention`, `compaction.max-objects-per-block`, `compaction.max-block-bytes`, `compaction.compaction-window`. [#6909](https://github.com/grafana/tempo/pull/6909) (@electron0zero)
 * [CHANGE] **BREAKING CHANGE** Enable RetryInfo by default. `distributor.retry_after_on_resource_exhausted` now defaults to `5s` (was `0`) so OTLP clients receive a retry hint on `ResourceExhausted` errors. [#7088](https://github.com/grafana/tempo/pull/7088) (@electron0zero)
   Set to `0` to disable cluster-wide, or set the per-tenant override `ingestion.retry_info_enabled: false` to disable for a single tenant.
