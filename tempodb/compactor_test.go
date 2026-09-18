@@ -23,6 +23,7 @@ import (
 	"github.com/grafana/tempo/pkg/util/test"
 	"github.com/grafana/tempo/tempodb/backend"
 	"github.com/grafana/tempo/tempodb/backend/local"
+	"github.com/grafana/tempo/tempodb/blocklist"
 	"github.com/grafana/tempo/tempodb/encoding"
 	"github.com/grafana/tempo/tempodb/encoding/common"
 	"github.com/grafana/tempo/tempodb/pool"
@@ -499,6 +500,152 @@ func testCompactionRoundtrip(t *testing.T, targetBlockVersion string) {
 			require.True(t, proto.Equal(allReqs[i], result))
 		})
 	}
+}
+
+func TestSameIDCompaction(t *testing.T) {
+	for _, enc := range encoding.AllEncodingsForWrites() {
+		t.Run(enc.Version(), func(t *testing.T) {
+			testSameIDCompaction(t, enc.Version())
+		})
+	}
+}
+
+// testSameIDCompaction is a bit gross in that it has a bad dependency on the /pkg/model
+// module to do a full e2e compaction/combination test.
+func testSameIDCompaction(t *testing.T, targetBlockVersion string) {
+	tempDir := t.TempDir()
+
+	r, w, c, err := New(&Config{
+		Backend: backend.Local,
+		Pool: &pool.Config{
+			MaxWorkers: 10,
+			QueueDepth: 100,
+		},
+		Local: &local.Config{
+			Path: path.Join(tempDir, "traces"),
+		},
+		Block: &common.BlockConfig{
+			BloomFP:             .01,
+			BloomShardSizeBytes: 100_000,
+			Version:             targetBlockVersion,
+			RowGroupSizeBytes:   30_000_000,
+		},
+		WAL: &wal.Config{
+			Filepath: path.Join(tempDir, "wal"),
+		},
+		BlocklistPoll: 0,
+	}, nil, log.NewNopLogger())
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	r.EnablePolling(ctx, &mockJobSharder{}, false)
+
+	wal := w.WAL()
+	require.NoError(t, err)
+
+	dec := model.MustNewSegmentDecoder(v1.Encoding)
+
+	blockCount := 5
+	recordCount := 100
+
+	// make a bunch of sharded requests
+	allReqs := make([][][]byte, 0, recordCount)
+	allIDs := make([][]byte, 0, recordCount)
+	sharded := 0
+	for i := 0; i < recordCount; i++ {
+		id := test.ValidTraceID(nil)
+
+		requestShards := rand.Intn(blockCount) + 1
+		reqs := make([][]byte, 0, requestShards)
+		for j := 0; j < requestShards; j++ {
+			buff, err := dec.PrepareForWrite(test.MakeTrace(1, id), 0, 0)
+			require.NoError(t, err)
+
+			buff2, err := dec.ToObject([][]byte{buff})
+			require.NoError(t, err)
+
+			reqs = append(reqs, buff2)
+		}
+
+		if requestShards > 1 {
+			sharded++
+		}
+		allReqs = append(allReqs, reqs)
+		allIDs = append(allIDs, id)
+	}
+
+	// and write them to different blocks
+	for i := 0; i < blockCount; i++ {
+		blockID := backend.NewUUID()
+		meta := &backend.BlockMeta{BlockID: blockID, TenantID: testTenantID}
+		head, err := wal.NewBlock(meta, v1.Encoding)
+		require.NoError(t, err)
+
+		for j := 0; j < recordCount; j++ {
+			req := allReqs[j]
+			id := allIDs[j]
+
+			if i < len(req) {
+				err = head.Append(id, req[i], 0, 0, true)
+				require.NoError(t, err, "unexpected error writing req")
+			}
+		}
+
+		_, err = w.CompleteBlock(context.Background(), head)
+		require.NoError(t, err)
+	}
+
+	rw := r.(*readerWriter)
+
+	// check blocklists, force compaction and check again
+	checkBlocklists(ctx, t, uuid.Nil, blockCount, 0, rw)
+
+	metas := rw.blocklist.Metas(testTenantID)
+	require.Len(t, metas, blockCount)
+
+	combinedStart, err := test.GetCounterVecValue(metricCompactionObjectsCombined, "0")
+	require.NoError(t, err)
+
+	cfg := &CompactorConfig{
+		MaxCompactionRange:   24 * time.Hour,
+		MaxCompactionObjects: 10000,
+		MaxBlockBytes:        1024 * 1024 * 1024,
+	}
+	_, err = c.CompactWithConfig(ctx, metas, testTenantID, cfg, &mockSharder{}, &mockOverrides{})
+	require.NoError(t, err)
+
+	checkBlocklists(ctx, t, uuid.Nil, 1, blockCount, rw)
+
+	// force clear compacted blocks to guarantee that we're only querying the new blocks that went through the combiner
+	remaining := rw.blocklist.Metas(testTenantID)
+	rw.blocklist.ApplyPollResults(blocklist.PerTenant{testTenantID: remaining}, blocklist.PerTenantCompacted{})
+
+	// search for all ids
+	for i, id := range allIDs {
+		trs, failedBlocks, err := rw.Find(context.Background(), testTenantID, id, BlockIDMin, BlockIDMax, time.Time{}, time.Time{}, common.DefaultSearchOptions())
+		require.NoError(t, err)
+		require.Nil(t, failedBlocks)
+
+		combiner := modeltrace.NewCombiner(0, false)
+		for _, tr := range trs {
+			_, err = combiner.Consume(tr.Trace)
+			require.NoError(t, err)
+		}
+		tr, _ := combiner.Result()
+		b1, err := dec.PrepareForWrite(tr, 0, 0)
+		require.NoError(t, err)
+
+		b2, err := dec.ToObject([][]byte{b1})
+		require.NoError(t, err)
+
+		expectedBytes, _, err := model.StaticCombiner.Combine(v1.Encoding, allReqs[i]...)
+		require.NoError(t, err)
+		require.Equal(t, expectedBytes, b2)
+	}
+
+	combinedEnd, err := test.GetCounterVecValue(metricCompactionObjectsCombined, "0")
+	require.NoError(t, err)
+	require.Equal(t, float64(sharded), combinedEnd-combinedStart)
 }
 
 func TestCompactionHonorsBlockStartEndTimes(t *testing.T) {
