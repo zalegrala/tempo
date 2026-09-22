@@ -40,12 +40,14 @@ type PartitionReader struct {
 	client *kgo.Client
 	adm    *kadm.Client
 
-	lookbackPeriod    time.Duration
-	commitInterval    time.Duration
-	forceFromLookback bool
-	wg                sync.WaitGroup
-	offsetWatermark   atomic.Pointer[kadm.Offset]
-	lag               atomic.Int64
+	lookbackPeriod     time.Duration
+	commitInterval     time.Duration
+	forceFromLookback  bool
+	offsetFileEnforced bool
+	offsetFile         *ingest.OffsetFile
+	wg                 sync.WaitGroup
+	offsetWatermark    atomic.Pointer[kadm.Offset]
+	lag                atomic.Int64
 
 	consume consumeFn
 	metrics partitionReaderMetrics
@@ -53,24 +55,27 @@ type PartitionReader struct {
 	logger log.Logger
 }
 
-func NewPartitionReaderForPusher(client *kgo.Client, partitionID int32, cfg ingest.KafkaConfig, commitInterval time.Duration, lookbackPeriod time.Duration, forceFromLookback bool, consume consumeFn, logger log.Logger, reg prometheus.Registerer) (*PartitionReader, error) {
+func NewPartitionReaderForPusher(client *kgo.Client, partitionID int32, cfg ingest.KafkaConfig, commitInterval time.Duration, lookbackPeriod time.Duration, forceFromLookback bool, offsetFilePath string, consume consumeFn, logger log.Logger, reg prometheus.Registerer) (*PartitionReader, error) {
 	metrics := newPartitionReaderMetrics(partitionID, reg)
-	return newPartitionReader(client, partitionID, cfg, commitInterval, lookbackPeriod, forceFromLookback, consume, logger, metrics)
+	return newPartitionReader(client, partitionID, cfg, commitInterval, lookbackPeriod, forceFromLookback, offsetFilePath, consume, logger, metrics)
 }
 
-func newPartitionReader(client *kgo.Client, partitionID int32, cfg ingest.KafkaConfig, commitInterval time.Duration, lookbackPeriod time.Duration, forceFromLookback bool, consume consumeFn, logger log.Logger, metrics partitionReaderMetrics) (*PartitionReader, error) {
+func newPartitionReader(client *kgo.Client, partitionID int32, cfg ingest.KafkaConfig, commitInterval time.Duration, lookbackPeriod time.Duration, forceFromLookback bool, offsetFilePath string, consume consumeFn, logger log.Logger, metrics partitionReaderMetrics) (*PartitionReader, error) {
+	partitionLogger := log.With(logger, "partition", partitionID)
 	r := &PartitionReader{
-		partitionID:       partitionID,
-		consumerGroup:     cfg.ConsumerGroup,
-		topic:             cfg.Topic,
-		client:            client,
-		adm:               kadm.NewClient(client),
-		lookbackPeriod:    lookbackPeriod,
-		commitInterval:    commitInterval,
-		forceFromLookback: forceFromLookback,
-		consume:           consume,
-		metrics:           metrics,
-		logger:            log.With(logger, "partition", partitionID),
+		partitionID:        partitionID,
+		consumerGroup:      cfg.ConsumerGroup,
+		topic:              cfg.Topic,
+		client:             client,
+		adm:                kadm.NewClient(client),
+		lookbackPeriod:     lookbackPeriod,
+		commitInterval:     commitInterval,
+		forceFromLookback:  forceFromLookback,
+		offsetFileEnforced: cfg.ConsumerGroupOffsetCommitFileEnforced,
+		offsetFile:         ingest.NewOffsetFile(offsetFilePath, partitionID, partitionLogger),
+		consume:            consume,
+		metrics:            metrics,
+		logger:             partitionLogger,
 	}
 	r.lag.Store(-1)
 	r.Service = services.NewBasicService(r.start, r.running, r.stop)
@@ -262,7 +267,40 @@ func (r *PartitionReader) fetchLastCommittedOffsetWithRetries(ctx context.Contex
 	return offset, err
 }
 
+// fetchFileOffset returns the offset stored in the local offset file, if the file-based
+// enforcement is enabled and the file exists and its offset is still valid for the partition
+// (i.e. hasn't fallen behind the partition's earliest available offset). Otherwise it returns
+// false, and the caller should fall back to the Kafka consumer group offset.
+func (r *PartitionReader) fetchFileOffset(ctx context.Context) (int64, bool) {
+	if !r.offsetFileEnforced {
+		return 0, false
+	}
+
+	fileOffset, exists := r.offsetFile.Read()
+	if !exists {
+		return 0, false
+	}
+
+	startOffsets, err := r.adm.ListStartOffsets(ctx, r.topic)
+	if err != nil {
+		level.Warn(r.logger).Log("msg", "failed to list partition start offset, ignoring file-stored offset", "err", err)
+		return 0, false
+	}
+	startOffset, found := startOffsets.Lookup(r.topic, r.partitionID)
+	if !found || startOffset.Err != nil || fileOffset < startOffset.Offset {
+		level.Warn(r.logger).Log("msg", "file-stored offset no longer exists in partition, falling back to Kafka consumer group offset", "file_offset", fileOffset)
+		return 0, false
+	}
+
+	level.Info(r.logger).Log("msg", "starting consumption from file-stored offset", "file_offset", fileOffset)
+	return fileOffset, true
+}
+
 func (r *PartitionReader) fetchLastCommittedOffset(ctx context.Context) (kgo.Offset, error) {
+	if fileOffset, ok := r.fetchFileOffset(ctx); ok {
+		return kgo.NewOffset().At(fileOffset + 1), nil
+	}
+
 	offsets, err := r.adm.FetchOffsets(ctx, r.consumerGroup)
 	if errors.Is(err, kerr.UnknownTopicOrPartition) {
 		// In case we are booting up for the first time ever against this topic.
@@ -324,8 +362,13 @@ func (r *PartitionReader) commitOffset(ctx context.Context, offset kadm.Offset) 
 	offsets := make(kadm.Offsets)
 	offsets.Add(offset)
 
-	_, err := r.adm.CommitOffsets(ctx, r.consumerGroup, offsets)
-	return err
+	_, kafkaErr := r.adm.CommitOffsets(ctx, r.consumerGroup, offsets)
+	fileErr := r.offsetFile.Write(offset.At)
+
+	merr := multierror.New()
+	merr.Add(kafkaErr)
+	merr.Add(fileErr)
+	return merr.Err()
 }
 
 type partitionReaderMetrics struct {

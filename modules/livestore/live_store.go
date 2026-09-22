@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -410,7 +411,8 @@ func (s *LiveStore) startKafkaIngestPath(ctx context.Context) error {
 	}
 
 	lookbackPeriod := 2 * s.cfg.CompleteBlockTimeout
-	reader, err := NewPartitionReaderForPusher(s.client, s.ingestPartitionID, s.cfg.IngestConfig.Kafka, s.cfg.CommitInterval, lookbackPeriod, forceFromLookback, s.consume, s.logger, s.reg)
+	offsetFilePath := filepath.Join(s.cfg.WAL.Filepath, "kafka-offset.json")
+	reader, err := NewPartitionReaderForPusher(s.client, s.ingestPartitionID, s.cfg.IngestConfig.Kafka, s.cfg.CommitInterval, lookbackPeriod, forceFromLookback, offsetFilePath, s.consume, s.logger, s.reg)
 	if err != nil {
 		return fmt.Errorf("failed to create partition reader: %w", err)
 	}

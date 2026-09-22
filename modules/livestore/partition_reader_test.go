@@ -3,6 +3,7 @@ package livestore
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -161,7 +162,8 @@ func TestFetchLastCommittedOffsetForceFromLookback(t *testing.T) {
 		readerClient, err := ingest.NewReaderClient(cfg, ingest.NewReaderClientMetrics(liveStoreServiceName, prometheus.NewRegistry()), l)
 		require.NoError(t, err)
 
-		r, err := newPartitionReader(readerClient, testPartition, cfg, 0, lookback, false, nil, l, newPartitionReaderMetrics(testPartition, prometheus.NewRegistry()))
+		offsetFilePath := filepath.Join(t.TempDir(), "kafka-offset.json")
+		r, err := newPartitionReader(readerClient, testPartition, cfg, 0, lookback, false, offsetFilePath, nil, l, newPartitionReaderMetrics(testPartition, prometheus.NewRegistry()))
 		require.NoError(t, err)
 
 		offset, err := r.fetchLastCommittedOffset(t.Context())
@@ -199,7 +201,8 @@ func TestFetchLastCommittedOffsetForceFromLookback(t *testing.T) {
 		readerClient, err := ingest.NewReaderClient(cfg, ingest.NewReaderClientMetrics(liveStoreServiceName, prometheus.NewRegistry()), l)
 		require.NoError(t, err)
 
-		r, err := newPartitionReader(readerClient, testPartition, cfg, 0, lookback, true, nil, l, newPartitionReaderMetrics(testPartition, prometheus.NewRegistry()))
+		offsetFilePath := filepath.Join(t.TempDir(), "kafka-offset.json")
+		r, err := newPartitionReader(readerClient, testPartition, cfg, 0, lookback, true, offsetFilePath, nil, l, newPartitionReaderMetrics(testPartition, prometheus.NewRegistry()))
 		require.NoError(t, err)
 
 		offset, err := r.fetchLastCommittedOffset(t.Context())
@@ -225,7 +228,8 @@ func TestFetchLastCommittedOffsetForceFromLookback(t *testing.T) {
 		readerClient, err := ingest.NewReaderClient(cfg, ingest.NewReaderClientMetrics(liveStoreServiceName, prometheus.NewRegistry()), l)
 		require.NoError(t, err)
 
-		r, err := newPartitionReader(readerClient, testPartition, cfg, 0, lookback, true, nil, l, newPartitionReaderMetrics(testPartition, prometheus.NewRegistry()))
+		offsetFilePath := filepath.Join(t.TempDir(), "kafka-offset.json")
+		r, err := newPartitionReader(readerClient, testPartition, cfg, 0, lookback, true, offsetFilePath, nil, l, newPartitionReaderMetrics(testPartition, prometheus.NewRegistry()))
 		require.NoError(t, err)
 
 		offset, err := r.fetchLastCommittedOffset(t.Context())
@@ -236,6 +240,162 @@ func TestFetchLastCommittedOffsetForceFromLookback(t *testing.T) {
 		expectedMilli := time.Now().Add(-lookback).UnixMilli()
 		assert.InDelta(t, expectedMilli, epochOffset.Offset, 5000, "offset should be near lookback time in millis")
 		assert.Equal(t, int32(-1), epochOffset.Epoch, "epoch=-1 indicates AfterMilli offset")
+	})
+}
+
+func TestFetchLastCommittedOffsetFromFile(t *testing.T) {
+	setupReader := func(t *testing.T, address string, fileEnforced bool) (*PartitionReader, string) {
+		l := test.NewTestingLogger(t)
+		cfg := ingest.KafkaConfig{}
+		flagext.DefaultValues(&cfg)
+		cfg.Address = address
+		cfg.Topic = testTopic
+		cfg.ConsumerGroup = testConsumerGroup
+		cfg.ConsumerGroupOffsetCommitFileEnforced = fileEnforced
+
+		readerClient, err := ingest.NewReaderClient(cfg, ingest.NewReaderClientMetrics(liveStoreServiceName, prometheus.NewRegistry()), l)
+		require.NoError(t, err)
+
+		offsetFilePath := filepath.Join(t.TempDir(), "kafka-offset.json")
+		r, err := newPartitionReader(readerClient, testPartition, cfg, 0, time.Hour, false, offsetFilePath, nil, l, newPartitionReaderMetrics(testPartition, prometheus.NewRegistry()))
+		require.NoError(t, err)
+		return r, offsetFilePath
+	}
+
+	commitKafkaOffset := func(t *testing.T, address string, at int64) {
+		client := testkafka.NewKafkaClient(t, address, testTopic)
+		adm := kadm.NewClient(client)
+		offsets := make(kadm.Offsets)
+		offsets.Add(kadm.Offset{Topic: testTopic, Partition: testPartition, At: at})
+		_, err := adm.CommitOffsets(t.Context(), testConsumerGroup, offsets)
+		require.NoError(t, err)
+	}
+
+	t.Run("enforcement enabled and file valid, file offset takes precedence over Kafka commit", func(t *testing.T) {
+		_, address := testkafka.CreateCluster(t, 1, testTopic)
+		client := testkafka.NewKafkaClient(t, address, testTopic)
+		for range 5 {
+			testkafka.SendReq(t.Context(), t, client, ingest.Encode, testTenantID)
+		}
+		commitKafkaOffset(t, address, 4) // Kafka group offset points at the last record.
+
+		r, offsetFilePath := setupReader(t, address, true)
+		require.NoError(t, ingest.NewOffsetFile(offsetFilePath, testPartition, r.logger).Write(1))
+
+		offset, err := r.fetchLastCommittedOffset(t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, int64(2), offset.EpochOffset().Offset) // file offset + 1, not the Kafka-committed offset.
+	})
+
+	t.Run("enforcement disabled, file offset is ignored in favor of Kafka commit", func(t *testing.T) {
+		_, address := testkafka.CreateCluster(t, 1, testTopic)
+		client := testkafka.NewKafkaClient(t, address, testTopic)
+		for range 5 {
+			testkafka.SendReq(t.Context(), t, client, ingest.Encode, testTenantID)
+		}
+		commitKafkaOffset(t, address, 4)
+
+		r, offsetFilePath := setupReader(t, address, false)
+		require.NoError(t, ingest.NewOffsetFile(offsetFilePath, testPartition, r.logger).Write(1))
+
+		offset, err := r.fetchLastCommittedOffset(t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, int64(4), offset.EpochOffset().Offset) // Kafka-committed offset, file ignored.
+	})
+
+	t.Run("file with mismatched partition ID is treated as absent, falls back to Kafka commit", func(t *testing.T) {
+		_, address := testkafka.CreateCluster(t, 1, testTopic)
+		client := testkafka.NewKafkaClient(t, address, testTopic)
+		for range 5 {
+			testkafka.SendReq(t.Context(), t, client, ingest.Encode, testTenantID)
+		}
+		commitKafkaOffset(t, address, 4)
+
+		r, offsetFilePath := setupReader(t, address, true)
+		require.NoError(t, ingest.NewOffsetFile(offsetFilePath, testPartition+1, r.logger).Write(1))
+
+		offset, err := r.fetchLastCommittedOffset(t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, int64(4), offset.EpochOffset().Offset)
+	})
+
+	t.Run("no offset file, falls back to Kafka commit", func(t *testing.T) {
+		_, address := testkafka.CreateCluster(t, 1, testTopic)
+		client := testkafka.NewKafkaClient(t, address, testTopic)
+		for range 5 {
+			testkafka.SendReq(t.Context(), t, client, ingest.Encode, testTenantID)
+		}
+		commitKafkaOffset(t, address, 4)
+
+		r, _ := setupReader(t, address, true)
+
+		offset, err := r.fetchLastCommittedOffset(t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, int64(4), offset.EpochOffset().Offset)
+	})
+}
+
+func TestCommitOffsetWritesKafkaAndFile(t *testing.T) {
+	t.Run("commit writes to both Kafka and the local file", func(t *testing.T) {
+		_, address := testkafka.CreateCluster(t, 1, testTopic)
+
+		l := test.NewTestingLogger(t)
+		cfg := ingest.KafkaConfig{}
+		flagext.DefaultValues(&cfg)
+		cfg.Address = address
+		cfg.Topic = testTopic
+		cfg.ConsumerGroup = testConsumerGroup
+
+		readerClient, err := ingest.NewReaderClient(cfg, ingest.NewReaderClientMetrics(liveStoreServiceName, prometheus.NewRegistry()), l)
+		require.NoError(t, err)
+
+		offsetFilePath := filepath.Join(t.TempDir(), "kafka-offset.json")
+		r, err := newPartitionReader(readerClient, testPartition, cfg, 0, time.Hour, false, offsetFilePath, nil, l, newPartitionReaderMetrics(testPartition, prometheus.NewRegistry()))
+		require.NoError(t, err)
+
+		require.NoError(t, r.commitOffset(t.Context(), kadm.Offset{Topic: testTopic, Partition: testPartition, At: 7}))
+
+		fileOffset, exists := ingest.NewOffsetFile(offsetFilePath, testPartition, l).Read()
+		require.True(t, exists)
+		assert.Equal(t, int64(7), fileOffset)
+
+		adm := kadm.NewClient(readerClient)
+		offsets, err := adm.FetchOffsets(t.Context(), testConsumerGroup)
+		require.NoError(t, err)
+		kafkaOffset, found := offsets.Lookup(testTopic, testPartition)
+		require.True(t, found)
+		assert.Equal(t, int64(7), kafkaOffset.At)
+	})
+
+	t.Run("file write failure surfaces even though Kafka commit succeeds", func(t *testing.T) {
+		_, address := testkafka.CreateCluster(t, 1, testTopic)
+
+		l := test.NewTestingLogger(t)
+		cfg := ingest.KafkaConfig{}
+		flagext.DefaultValues(&cfg)
+		cfg.Address = address
+		cfg.Topic = testTopic
+		cfg.ConsumerGroup = testConsumerGroup
+
+		readerClient, err := ingest.NewReaderClient(cfg, ingest.NewReaderClientMetrics(liveStoreServiceName, prometheus.NewRegistry()), l)
+		require.NoError(t, err)
+
+		// Use a directory as the offset file path: the rename-into-place in the
+		// atomic writer will fail because a directory already exists there.
+		offsetFilePath := t.TempDir()
+		r, err := newPartitionReader(readerClient, testPartition, cfg, 0, time.Hour, false, offsetFilePath, nil, l, newPartitionReaderMetrics(testPartition, prometheus.NewRegistry()))
+		require.NoError(t, err)
+
+		err = r.commitOffset(t.Context(), kadm.Offset{Topic: testTopic, Partition: testPartition, At: 7})
+		require.Error(t, err)
+
+		// The Kafka commit itself should still have gone through.
+		adm := kadm.NewClient(readerClient)
+		offsets, err := adm.FetchOffsets(t.Context(), testConsumerGroup)
+		require.NoError(t, err)
+		kafkaOffset, found := offsets.Lookup(testTopic, testPartition)
+		require.True(t, found)
+		assert.Equal(t, int64(7), kafkaOffset.At)
 	})
 }
 
@@ -255,7 +415,8 @@ func defaultPartitionReaderWithCommitInterval(t *testing.T, address string, comm
 	)
 	require.NoError(t, err)
 
-	r, err := newPartitionReader(client, 0, cfg, commitInterval, time.Hour, false, consume, l, newPartitionReaderMetrics(testPartition, prometheus.NewRegistry()))
+	offsetFilePath := filepath.Join(t.TempDir(), "kafka-offset.json")
+	r, err := newPartitionReader(client, 0, cfg, commitInterval, time.Hour, false, offsetFilePath, consume, l, newPartitionReaderMetrics(testPartition, prometheus.NewRegistry()))
 	require.NoError(t, err)
 
 	err = services.StartAndAwaitRunning(t.Context(), r)
